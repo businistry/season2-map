@@ -1033,16 +1033,25 @@ export default function Season2MapPlanner() {
                 const isOptimized = highlightOptimized.has(key);
                 
                 // Calculate colors based on accessibility mode
-                let cellColor, borderColor, shadowColor, tagColor;
+                let cellColor, borderColor, shadowColor, tagColor, textColor;
                 const accessibilityPattern = getAccessibilityPattern(cell.type);
                 
                 if (accessibilityMode) {
-                  // Grayscale/high-contrast mode: use brightness levels and pattern borders
-                  const levelBrightness = Math.max(30, 90 - (cell.lvl * 10));
-                  const baseBrightness = 60; // Default for building type
-                  cellColor = `hsl(0, 0%, ${alliance ? baseBrightness : levelBrightness}%)`;
-                  borderColor = alliance ? '#ffffff' : `hsl(0, 0%, ${Math.min(90, levelBrightness + 30)}%)`;
-                  shadowColor = 'rgba(0,0,0,0.7)';
+                  // Grayscale/high-contrast mode: consistent dark background with white text
+                  // Use border brightness to indicate level (lighter border = higher level)
+                  const baseBrightness = alliance ? 40 : 35; // Dark gray background
+                  const levelBorderBrightness = 60 + (cell.lvl * 5); // Range: 60-90% for borders
+                  
+                  // Consistent dark background for all cells (easy to read white text)
+                  cellColor = `hsl(0, 0%, ${baseBrightness}%)`;
+                  
+                  // Border brightness indicates level (higher level = brighter border)
+                  borderColor = `hsl(0, 0%, ${levelBorderBrightness}%)`;
+                  
+                  shadowColor = 'rgba(0,0,0,0.8)';
+                  
+                  // Always use white text on dark background for maximum contrast
+                  textColor = '#ffffff';
                   tagColor = '#ffffff';
                 } else {
                   // Normal color mode
@@ -1052,6 +1061,7 @@ export default function Season2MapPlanner() {
                     ? `${alliance.color}88`
                     : lvlColor.glow;
                   tagColor = alliance ? alliance.color : '#ffffff';
+                  textColor = '#ffffff';
                 }
 
                 const cellStyle = {
@@ -1065,12 +1075,13 @@ export default function Season2MapPlanner() {
                     : `2px solid ${borderColor}`,
                   borderColor: borderColor,
                   opacity: accessibilityMode ? accessibilityPattern.opacity : 1,
-                  filter: accessibilityMode ? 'grayscale(100%) contrast(1.2)' : 'none',
+                  filter: accessibilityMode ? 'grayscale(100%) contrast(1.3)' : 'none',
                   boxShadow: accessibilityMode
-                    ? `0 0 4px ${shadowColor}`
+                    ? `0 0 4px ${shadowColor}, inset 0 0 2px rgba(0,0,0,0.1)`
                     : alliance 
                       ? `0 0 12px ${shadowColor}, inset 0 0 8px rgba(255,255,255,0.2)`
                       : `0 0 6px ${shadowColor}`,
+                  color: accessibilityMode ? textColor : undefined, // Set text color for accessibility mode
                 };
 
                 return (
@@ -1082,10 +1093,39 @@ export default function Season2MapPlanner() {
                     onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
                     onMouseLeave={() => setHoveredCell(null)}
                   >
-                    <span className="cell-type">{config.name}</span>
-                    <span className="cell-level">L{cell.lvl}</span>
+                    <span 
+                      className="cell-type" 
+                      style={{ 
+                        color: accessibilityMode ? textColor : undefined,
+                        textShadow: accessibilityMode 
+                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
+                          : '0 0 2px rgba(0,0,0,0.8)'
+                      }}
+                    >
+                      {config.name}
+                    </span>
+                    <span 
+                      className="cell-level" 
+                      style={{ 
+                        color: accessibilityMode ? textColor : undefined,
+                        textShadow: accessibilityMode 
+                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
+                          : '0 0 2px rgba(0,0,0,0.8)'
+                      }}
+                    >
+                      L{cell.lvl}
+                    </span>
                     {alliance && (
-                      <span className="cell-tag" style={{ color: tagColor, textShadow: accessibilityMode ? '0 0 2px rgba(0,0,0,0.8)' : 'none' }}>
+                      <span 
+                        className="cell-tag" 
+                        style={{ 
+                          color: tagColor,
+                          textShadow: accessibilityMode 
+                            ? (tagColor === '#ffffff' ? '0 0 3px rgba(0,0,0,0.9)' : '0 0 3px rgba(255,255,255,0.9)')
+                            : '0 0 2px rgba(0,0,0,0.8)',
+                          fontWeight: accessibilityMode ? '900' : '700'
+                        }}
+                      >
                         {alliance.tag}
                       </span>
                     )}
