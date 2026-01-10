@@ -107,6 +107,9 @@ export default function Season2MapPlanner() {
   // Screenshot mode
   const [screenshotMode, setScreenshotMode] = useState(false);
   
+  // Accessibility mode (grayscale/high-contrast)
+  const [accessibilityMode, setAccessibilityMode] = useState(false);
+  
   // Resource optimizer
   const [showOptimizer, setShowOptimizer] = useState(false);
   const [optimizerResource, setOptimizerResource] = useState('Food');
@@ -400,6 +403,30 @@ export default function Season2MapPlanner() {
 
   const getActiveAllianceColor = () => {
     return alliances.find(a => a.id === activeAlliance)?.color || '#00ff88';
+  };
+
+  // Convert hex color to grayscale
+  const toGrayscale = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    return `#${gray.toString(16).padStart(2, '0')}${gray.toString(16).padStart(2, '0')}${gray.toString(16).padStart(2, '0')}`;
+  };
+
+  // Get high-contrast patterns for building types
+  const getAccessibilityPattern = (type) => {
+    const patterns = {
+      dig: { borderStyle: 'solid', borderWidth: '2px', opacity: 1 },
+      village: { borderStyle: 'dashed', borderWidth: '2px', opacity: 0.9 },
+      town: { borderStyle: 'dotted', borderWidth: '2px', opacity: 0.95 },
+      factory: { borderStyle: 'double', borderWidth: '3px', opacity: 1 },
+      train: { borderStyle: 'solid', borderWidth: '3px', opacity: 0.9 },
+      launch: { borderStyle: 'solid', borderWidth: '4px', opacity: 0.95 },
+      palace: { borderStyle: 'solid', borderWidth: '4px', opacity: 1 },
+      capitol: { borderStyle: 'solid', borderWidth: '5px', opacity: 1 },
+    };
+    return patterns[type] || patterns.dig;
   };
 
   // Resource Optimizer
@@ -838,6 +865,14 @@ export default function Season2MapPlanner() {
             </button>
             
             <button 
+              className={`btn btn-small ${accessibilityMode ? 'active' : ''}`}
+              onClick={() => setAccessibilityMode(!accessibilityMode)}
+              title="Toggle Grayscale/High-Contrast Mode"
+            >
+              {accessibilityMode ? '🎨 Color' : '⚫ Grayscale'}
+            </button>
+            
+            <button 
               className="btn btn-small"
               onClick={() => setScreenshotMode(true)}
             >
@@ -995,22 +1030,54 @@ export default function Season2MapPlanner() {
                 const config = typeConfig[cell.type];
                 const lvlColor = levelColors[cell.lvl] || levelColors[1];
                 const highlighted = shouldHighlight(cell);
-                const cellColor = alliance ? alliance.color : config.baseColor;
                 const isOptimized = highlightOptimized.has(key);
+                
+                // Calculate colors based on accessibility mode
+                let cellColor, borderColor, shadowColor, tagColor;
+                const accessibilityPattern = getAccessibilityPattern(cell.type);
+                
+                if (accessibilityMode) {
+                  // Grayscale/high-contrast mode: use brightness levels and pattern borders
+                  const levelBrightness = Math.max(30, 90 - (cell.lvl * 10));
+                  const baseBrightness = 60; // Default for building type
+                  cellColor = `hsl(0, 0%, ${alliance ? baseBrightness : levelBrightness}%)`;
+                  borderColor = alliance ? '#ffffff' : `hsl(0, 0%, ${Math.min(90, levelBrightness + 30)}%)`;
+                  shadowColor = 'rgba(0,0,0,0.7)';
+                  tagColor = '#ffffff';
+                } else {
+                  // Normal color mode
+                  cellColor = alliance ? alliance.color : config.baseColor;
+                  borderColor = alliance ? alliance.color : lvlColor.border;
+                  shadowColor = alliance 
+                    ? `${alliance.color}88`
+                    : lvlColor.glow;
+                  tagColor = alliance ? alliance.color : '#ffffff';
+                }
+
+                const cellStyle = {
+                  background: accessibilityMode
+                    ? `${cellColor}`
+                    : alliance 
+                      ? `linear-gradient(135deg, ${cellColor}dd 0%, ${cellColor}99 100%)`
+                      : `linear-gradient(135deg, ${cellColor} 0%, ${cellColor}dd 100%)`,
+                  border: accessibilityMode
+                    ? `${accessibilityPattern.borderWidth} ${accessibilityPattern.borderStyle} ${borderColor}`
+                    : `2px solid ${borderColor}`,
+                  borderColor: borderColor,
+                  opacity: accessibilityMode ? accessibilityPattern.opacity : 1,
+                  filter: accessibilityMode ? 'grayscale(100%) contrast(1.2)' : 'none',
+                  boxShadow: accessibilityMode
+                    ? `0 0 4px ${shadowColor}`
+                    : alliance 
+                      ? `0 0 12px ${shadowColor}, inset 0 0 8px rgba(255,255,255,0.2)`
+                      : `0 0 6px ${shadowColor}`,
+                };
 
                 return (
                   <div
                     key={key}
                     className={`cell ${!highlighted ? 'dimmed' : ''} ${isOptimized ? 'optimized' : ''}`}
-                    style={{
-                      background: alliance 
-                        ? `linear-gradient(135deg, ${cellColor}dd 0%, ${cellColor}99 100%)`
-                        : `linear-gradient(135deg, ${cellColor} 0%, ${cellColor}dd 100%)`,
-                      border: `2px solid ${alliance ? alliance.color : lvlColor.border}`,
-                      boxShadow: alliance 
-                        ? `0 0 12px ${alliance.color}88, inset 0 0 8px rgba(255,255,255,0.2)`
-                        : `0 0 6px ${lvlColor.glow}`,
-                    }}
+                    style={cellStyle}
                     onClick={() => !screenshotMode && toggleCell(rowIdx, colIdx)}
                     onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
                     onMouseLeave={() => setHoveredCell(null)}
@@ -1018,7 +1085,7 @@ export default function Season2MapPlanner() {
                     <span className="cell-type">{config.name}</span>
                     <span className="cell-level">L{cell.lvl}</span>
                     {alliance && (
-                      <span className="cell-tag" style={{ color: alliance.color }}>
+                      <span className="cell-tag" style={{ color: tagColor, textShadow: accessibilityMode ? '0 0 2px rgba(0,0,0,0.8)' : 'none' }}>
                         {alliance.tag}
                       </span>
                     )}
