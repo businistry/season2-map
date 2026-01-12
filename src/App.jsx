@@ -334,7 +334,7 @@ export default function Season2MapPlanner() {
           where('online', '==', true)
         );
         
-        presenceUnsubscribeRef.current = onSnapshotPresence(presenceQuery, (snapshot) => {
+        presenceUnsubscribeRef.current = onSnapshot(presenceQuery, (snapshot) => {
           const users = [];
           snapshot.forEach((doc) => {
             const data = doc.data();
