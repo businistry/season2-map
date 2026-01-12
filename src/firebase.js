@@ -8,12 +8,13 @@ import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 // Your Firebase configuration object
 // Get this from Firebase Console > Project Settings > General > Your apps
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyB0CC74Hv3QIsLwClw5RbPVMQfpVQUmvmI",
+  authDomain: "lastwarseason2map.firebaseapp.com",
+  projectId: "lastwarseason2map",
+  storageBucket: "lastwarseason2map.firebasestorage.app",
+  messagingSenderId: "560862344896",
+  appId: "1:560862344896:web:018a6dd9b114f81b605f25",
+  measurementId: "G-LJ4QVNBEDJ"
 };
 
 // Initialize Firebase
