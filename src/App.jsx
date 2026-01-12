@@ -1,4 +1,18 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { 
+  doc, 
+  getDoc, 
+  setDoc, 
+  onSnapshot, 
+  serverTimestamp,
+  collection,
+  query,
+  where,
+  onSnapshot as onSnapshotPresence,
+  getDocs,
+  updateDoc
+} from 'firebase/firestore';
+import { db } from './firebase';
 
 const mapData = [
   // Row 0 (outermost ring - Level 1)
@@ -67,6 +81,26 @@ const defaultAlliances = [
 const STORAGE_KEY = 'lastwar-s2-planner-data';
 const STORAGE_VERSION = 1;
 
+// Firebase configuration
+const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances
+const PRESENCE_COLLECTION = 'presence'; // Track active users
+
+// Generate unique user ID for this session
+const USER_ID = localStorage.getItem('user-id') || `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+if (!localStorage.getItem('user-id')) {
+  localStorage.setItem('user-id', USER_ID);
+}
+
+// Get or create user name (lazy initialization)
+const getUserName = () => {
+  const saved = localStorage.getItem('user-name');
+  if (saved) return saved;
+  // Default name if not set (will prompt on first use)
+  return `User ${USER_ID.slice(-4)}`;
+};
+
+let USER_NAME = getUserName();
+
 // Build indexed tile data for optimizer
 const allTiles = [];
 mapData.forEach((row, rowIdx) => {
@@ -123,39 +157,232 @@ export default function Season2MapPlanner() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [showImportExport, setShowImportExport] = useState(false);
   const [planName, setPlanName] = useState('Nova Imperium S2 Plan');
+  
+  // Firebase/Real-time collaboration state
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [activeUsers, setActiveUsers] = useState([]);
+  const [useFirebase, setUseFirebase] = useState(true); // Toggle between Firebase and localStorage
+  const unsubscribeRef = useRef(null);
+  const presenceUnsubscribeRef = useRef(null);
+  const lastUpdateRef = useRef(Date.now());
+  const userNameRef = useRef(USER_NAME);
+  
+  // Prompt for user name on first Firebase connection
+  useEffect(() => {
+    if (useFirebase && db && isConnecting && !localStorage.getItem('user-name')) {
+      const name = prompt('Enter your name (for collaboration):') || `User ${USER_ID.slice(-4)}`;
+      localStorage.setItem('user-name', name);
+      userNameRef.current = name;
+    }
+  }, [isConnecting, useFirebase]);
 
   const mapRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Load data from localStorage on mount
+  // Initialize Firebase connection and load data
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.version === STORAGE_VERSION) {
-          setAlliances(data.alliances || defaultAlliances);
-          setCellAssignments(data.cellAssignments || {});
-          setActiveAlliance(data.activeAlliance || 'nova');
-          setPlanName(data.planName || 'Nova Imperium S2 Plan');
-          setHistory([data.cellAssignments || {}]);
-          setHistoryIndex(0);
-          setLastSaved(data.savedAt ? new Date(data.savedAt) : null);
-          setSaveStatus('Loaded from previous session');
+    if (!useFirebase || !db) {
+      // Fallback to localStorage
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data.version === STORAGE_VERSION) {
+            setAlliances(data.alliances || defaultAlliances);
+            setCellAssignments(data.cellAssignments || {});
+            setActiveAlliance(data.activeAlliance || 'nova');
+            setPlanName(data.planName || 'Nova Imperium S2 Plan');
+            setHistory([data.cellAssignments || {}]);
+            setHistoryIndex(0);
+            setLastSaved(data.savedAt ? new Date(data.savedAt) : null);
+            setSaveStatus('Loaded from localStorage');
+          }
         }
+      } catch (e) {
+        console.error('Failed to load saved data:', e);
+        setSaveStatus('Failed to load saved data');
       }
-    } catch (e) {
-      console.error('Failed to load saved data:', e);
-      setSaveStatus('Failed to load saved data');
+      setIsConnecting(false);
+      setIsLoaded(true);
+      return;
     }
-    setIsLoaded(true);
-  }, []);
 
-  // Auto-save to localStorage whenever data changes
+    // Initialize Firebase real-time sync
+    const initFirebase = async () => {
+      try {
+        const roomRef = doc(db, 'rooms', ROOM_ID);
+        
+        // Try to load existing data
+        const docSnap = await getDoc(roomRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.version === STORAGE_VERSION) {
+            setAlliances(data.alliances || defaultAlliances);
+            setCellAssignments(data.cellAssignments || {});
+            setActiveAlliance(data.activeAlliance || 'nova');
+            setPlanName(data.planName || 'Nova Imperium S2 Plan');
+            setHistory([data.cellAssignments || {}]);
+            setHistoryIndex(0);
+            setLastSaved(data.updatedAt?.toDate() || null);
+            setSaveStatus('Connected - Real-time collaboration active');
+            setIsConnected(true);
+          }
+        } else {
+          // Create initial room document
+          await setDoc(roomRef, {
+            version: STORAGE_VERSION,
+            planName: 'Nova Imperium S2 Plan',
+            alliances: defaultAlliances,
+            cellAssignments: {},
+            activeAlliance: 'nova',
+            updatedAt: serverTimestamp(),
+          });
+          setSaveStatus('Connected - Room created');
+          setIsConnected(true);
+        }
+
+        // Set up real-time listener
+        unsubscribeRef.current = onSnapshot(roomRef, (snapshot) => {
+          if (!snapshot.exists()) return;
+          
+          const data = snapshot.data();
+          const now = Date.now();
+          
+          // Prevent infinite loops - ignore updates we just sent
+          if (now - lastUpdateRef.current < 1000) {
+            return;
+          }
+          
+          // Update state only if data changed
+          if (data.version === STORAGE_VERSION) {
+            setAlliances(data.alliances || defaultAlliances);
+            const newAssignments = data.cellAssignments || {};
+            
+            // Only update if different (to avoid unnecessary re-renders)
+            if (JSON.stringify(newAssignments) !== JSON.stringify(cellAssignments)) {
+              setCellAssignments(newAssignments);
+              setHistory([newAssignments]);
+              setHistoryIndex(0);
+            }
+            
+            setActiveAlliance(data.activeAlliance || 'nova');
+            setPlanName(data.planName || 'Nova Imperium S2 Plan');
+            setLastSaved(data.updatedAt?.toDate() || null);
+            setSaveStatus('');
+          }
+        }, (error) => {
+          console.error('Firebase sync error:', error);
+          setSaveStatus('Sync error - using local mode');
+          setIsConnected(false);
+        });
+
+        // Set up presence tracking
+        const presenceRef = doc(db, PRESENCE_COLLECTION, USER_ID);
+        
+        // Mark user as online
+        const currentUserName = localStorage.getItem('user-name') || userNameRef.current || `User ${USER_ID.slice(-4)}`;
+        await setDoc(presenceRef, {
+          userId: USER_ID,
+          userName: currentUserName,
+          roomId: ROOM_ID,
+          lastSeen: serverTimestamp(),
+          online: true,
+        });
+
+        // Update last seen every 30 seconds
+        const presenceInterval = setInterval(async () => {
+          if (isConnected) {
+            try {
+              await updateDoc(presenceRef, {
+                lastSeen: serverTimestamp(),
+                online: true,
+              });
+            } catch (e) {
+              console.error('Presence update failed:', e);
+            }
+          }
+        }, 30000);
+
+        // Listen for other users' presence
+        const presenceQuery = query(
+          collection(db, PRESENCE_COLLECTION),
+          where('roomId', '==', ROOM_ID),
+          where('online', '==', true)
+        );
+        
+        presenceUnsubscribeRef.current = onSnapshotPresence(presenceQuery, (snapshot) => {
+          const users = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            // Exclude current user
+            if (data.userId !== USER_ID) {
+              users.push({
+                id: data.userId,
+                name: data.userName || 'Anonymous',
+                lastSeen: data.lastSeen?.toDate() || new Date(),
+              });
+            }
+          });
+          setActiveUsers(users);
+        });
+
+        // Cleanup on unmount
+        return () => {
+          clearInterval(presenceInterval);
+          if (unsubscribeRef.current) unsubscribeRef.current();
+          if (presenceUnsubscribeRef.current) presenceUnsubscribeRef.current();
+          // Mark user as offline
+          updateDoc(presenceRef, { online: false }).catch(() => {});
+        };
+
+      } catch (error) {
+        console.error('Firebase initialization failed:', error);
+        setSaveStatus('Firebase unavailable - using localStorage');
+        setIsConnected(false);
+        
+        // Fallback to localStorage
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) {
+            const data = JSON.parse(saved);
+            if (data.version === STORAGE_VERSION) {
+              setAlliances(data.alliances || defaultAlliances);
+              setCellAssignments(data.cellAssignments || {});
+              setActiveAlliance(data.activeAlliance || 'nova');
+              setPlanName(data.planName || 'Nova Imperium S2 Plan');
+              setHistory([data.cellAssignments || {}]);
+              setHistoryIndex(0);
+              setLastSaved(data.savedAt ? new Date(data.savedAt) : null);
+            }
+          }
+        } catch (e) {
+          console.error('localStorage fallback failed:', e);
+        }
+      } finally {
+        setIsConnecting(false);
+        setIsLoaded(true);
+      }
+    };
+
+    initFirebase();
+
+    // Cleanup function
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+      if (presenceUnsubscribeRef.current) {
+        presenceUnsubscribeRef.current();
+      }
+    };
+  }, [useFirebase]);
+
+  // Auto-save to Firebase or localStorage whenever data changes
   useEffect(() => {
     if (!isLoaded) return; // Don't save until initial load is complete
     
-    const saveData = () => {
+    const saveData = async () => {
       try {
         const data = {
           version: STORAGE_VERSION,
@@ -165,9 +392,31 @@ export default function Season2MapPlanner() {
           activeAlliance,
           savedAt: new Date().toISOString(),
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        setLastSaved(new Date());
-        setSaveStatus('Auto-saved');
+
+        if (useFirebase && db && isConnected) {
+          // Save to Firebase
+          try {
+            const roomRef = doc(db, 'rooms', ROOM_ID);
+            lastUpdateRef.current = Date.now();
+            await setDoc(roomRef, {
+              ...data,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+            setLastSaved(new Date());
+            setSaveStatus('Saved to cloud');
+          } catch (firebaseError) {
+            console.error('Firebase save failed, falling back to localStorage:', firebaseError);
+            // Fallback to localStorage
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            setLastSaved(new Date());
+            setSaveStatus('Saved locally (Firebase error)');
+          }
+        } else {
+          // Save to localStorage
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          setLastSaved(new Date());
+          setSaveStatus('Auto-saved');
+        }
         
         // Clear status after 2 seconds
         setTimeout(() => setSaveStatus(''), 2000);
@@ -180,7 +429,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded]);
+  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -786,6 +1035,24 @@ export default function Season2MapPlanner() {
         .save-dot.unsaved {
           background: #ff8800;
         }
+        
+        .connection-status {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 10px;
+          padding: 4px 8px;
+          background: rgba(0,0,0,0.2);
+          border-radius: 4px;
+        }
+        
+        .user-list {
+          display: flex;
+          gap: 4px;
+          align-items: center;
+          font-size: 10px;
+          color: #888;
+        }
       `}</style>
 
       {/* Hidden file input for import */}
@@ -888,9 +1155,42 @@ export default function Season2MapPlanner() {
               💾 Save/Load
             </button>
             
-            <div className={`save-indicator ${saveStatus ? 'saved' : ''}`} style={{ marginLeft: 'auto' }}>
-              <div className={`save-dot ${saveStatus === '' && lastSaved ? '' : 'unsaved'}`} />
-              <span>{saveStatus || `Last saved: ${formatLastSaved()}`}</span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
+              {/* Connection Status */}
+              {isConnecting ? (
+                <div className="save-indicator" style={{ fontSize: '10px' }}>
+                  <span>🔌 Connecting...</span>
+                </div>
+              ) : isConnected && useFirebase ? (
+                <div className="save-indicator saved" style={{ fontSize: '10px' }}>
+                  <div className="save-dot" />
+                  <span>🟢 Online ({activeUsers.length + 1} active)</span>
+                </div>
+              ) : useFirebase ? (
+                <div className="save-indicator" style={{ fontSize: '10px', color: '#ff8800' }}>
+                  <span>🔴 Offline (local mode)</span>
+                </div>
+              ) : null}
+              
+              {/* Active Users List */}
+              {isConnected && activeUsers.length > 0 && (
+                <div style={{ 
+                  position: 'relative',
+                  fontSize: '10px',
+                  color: '#888',
+                }}>
+                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                    <span>👥</span>
+                    <span>{activeUsers.map(u => u.name).join(', ')}</span>
+                  </div>
+                </div>
+              )}
+              
+              {/* Save Status */}
+              <div className={`save-indicator ${saveStatus ? 'saved' : ''}`}>
+                <div className={`save-dot ${saveStatus === '' && lastSaved ? '' : 'unsaved'}`} />
+                <span>{saveStatus || `Last saved: ${formatLastSaved()}`}</span>
+              </div>
             </div>
           </div>
         </div>

@@ -15,6 +15,8 @@ An interactive map planning tool for coordinating alliance territory acquisition
 - **Undo/Redo** - Full history support (up to 50 actions)
 - **Screenshot Mode** - Clean view for sharing in Discord/Line
 - **Auto-Save** - Automatically saves to browser localStorage
+- **Real-Time Collaboration** - See live updates from all alliances working on the map simultaneously
+- **Active User Tracking** - See who else is currently working on the map
 - **Export/Import** - Share plans with alliance leadership via JSON files
 - **Resource Filtering** - Filter map by resource type to plan strategically
 
@@ -40,6 +42,25 @@ npm run dev
 ```
 
 Then open http://localhost:5173 in your browser.
+
+### Enable Real-Time Collaboration (Optional)
+
+To enable real-time collaboration so multiple alliances can work on the map simultaneously:
+
+1. **Install Firebase**:
+   ```bash
+   npm install firebase
+   ```
+
+2. **Set up Firebase**:
+   - Follow the detailed guide in `FIREBASE_SETUP.md`
+   - Create a Firebase project at [Firebase Console](https://console.firebase.google.com/)
+   - Configure Firestore database
+   - Update `src/firebase.js` with your Firebase credentials
+
+3. **Test**: Open the app in multiple browser tabs to see real-time sync in action!
+
+The app will automatically fall back to localStorage if Firebase is not configured or unavailable.
 
 ### Option 2: Using Create React App
 
