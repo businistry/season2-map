@@ -1217,11 +1217,20 @@ export default function Season2MapPlanner() {
                 </div>
               )}
               
-              {/* Save Status */}
-              <div className={`save-indicator ${saveStatus ? 'saved' : ''}`}>
-                <div className={`save-dot ${saveStatus === '' && lastSaved ? '' : 'unsaved'}`} />
-                <span>{saveStatus || `Last saved: ${formatLastSaved()}`}</span>
-              </div>
+              {/* Save Status - Just the dot */}
+              <div 
+                className="save-dot" 
+                style={{ 
+                  width: '10px', 
+                  height: '10px', 
+                  borderRadius: '50%',
+                  background: saveStatus ? '#00ff88' : (lastSaved ? '#00ff88' : '#ff8800'),
+                  transition: 'background 0.2s ease',
+                  cursor: 'default',
+                  flexShrink: 0
+                }}
+                title={saveStatus || (lastSaved ? `Last saved: ${formatLastSaved()}` : 'Not saved')}
+              />
             </div>
           </div>
         </div>
