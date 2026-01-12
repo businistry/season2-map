@@ -8,9 +8,8 @@ import {
   collection,
   query,
   where,
-  onSnapshot as onSnapshotPresence,
-  getDocs,
-  updateDoc
+  updateDoc,
+  getDocs
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -85,11 +84,22 @@ const STORAGE_VERSION = 1;
 const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances
 const PRESENCE_COLLECTION = 'presence'; // Track active users
 
-// Generate unique user ID for this session
-const USER_ID = localStorage.getItem('user-id') || `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-if (!localStorage.getItem('user-id')) {
-  localStorage.setItem('user-id', USER_ID);
-}
+// Generate unique user ID for this session (safe access)
+const getUserId = () => {
+  try {
+    let userId = localStorage.getItem('user-id');
+    if (!userId) {
+      userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('user-id', userId);
+    }
+    return userId;
+  } catch (e) {
+    // Fallback if localStorage is unavailable
+    return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+};
+
+const USER_ID = getUserId();
 
 // Get or create user name (lazy initialization)
 const getUserName = () => {
@@ -168,12 +178,16 @@ export default function Season2MapPlanner() {
   const lastUpdateRef = useRef(Date.now());
   const userNameRef = useRef(USER_NAME);
   
-  // Prompt for user name on first Firebase connection
+  // Prompt for user name on first Firebase connection (defer to avoid blocking render)
   useEffect(() => {
     if (useFirebase && db && isConnecting && !localStorage.getItem('user-name')) {
-      const name = prompt('Enter your name (for collaboration):') || `User ${USER_ID.slice(-4)}`;
-      localStorage.setItem('user-name', name);
-      userNameRef.current = name;
+      // Use setTimeout to avoid blocking initial render
+      const timer = setTimeout(() => {
+        const name = prompt('Enter your name (for collaboration):') || `User ${USER_ID.slice(-4)}`;
+        localStorage.setItem('user-name', name);
+        userNameRef.current = name;
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [isConnecting, useFirebase]);
 
@@ -182,7 +196,10 @@ export default function Season2MapPlanner() {
 
   // Initialize Firebase connection and load data
   useEffect(() => {
-    if (!useFirebase || !db) {
+    // Check if db is available (Firebase might not be initialized)
+    const dbAvailable = db !== null && db !== undefined;
+    
+    if (!useFirebase || !dbAvailable) {
       // Fallback to localStorage
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -210,6 +227,12 @@ export default function Season2MapPlanner() {
 
     // Initialize Firebase real-time sync
     const initFirebase = async () => {
+      if (!db) {
+        setIsConnecting(false);
+        setIsLoaded(true);
+        return;
+      }
+      
       try {
         const roomRef = doc(db, 'rooms', ROOM_ID);
         

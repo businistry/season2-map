@@ -1,12 +1,10 @@
 // Firebase configuration
-// IMPORTANT: Replace these with your Firebase project credentials
-// Get them from: https://console.firebase.google.com/
+// IMPORTANT: Install Firebase first with: npm install firebase
 
 import { initializeApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
 // Your Firebase configuration object
-// Get this from Firebase Console > Project Settings > General > Your apps
 const firebaseConfig = {
   apiKey: "AIzaSyB0CC74Hv3QIsLwClw5RbPVMQfpVQUmvmI",
   authDomain: "lastwarseason2map.firebaseapp.com",
@@ -18,8 +16,8 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-let app;
-let db;
+let app = null;
+let db = null;
 
 try {
   app = initializeApp(firebaseConfig);
@@ -35,6 +33,8 @@ try {
   });
 } catch (error) {
   console.warn('Firebase initialization failed. Using localStorage fallback:', error);
+  app = null;
+  db = null;
 }
 
 export { db };
