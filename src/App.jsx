@@ -135,7 +135,6 @@ export default function Season2MapPlanner() {
   const [activeAlliance, setActiveAlliance] = useState('nova');
   const [cellAssignments, setCellAssignments] = useState({});
   const [hoveredCell, setHoveredCell] = useState(null);
-  const [filter, setFilter] = useState('all');
   const [showLegend, setShowLegend] = useState(true);
   const [editingAlliance, setEditingAlliance] = useState(null);
   const [newAllianceName, setNewAllianceName] = useState('');
@@ -588,6 +587,17 @@ export default function Season2MapPlanner() {
     updateAssignments({});
   };
 
+  const startNewMap = () => {
+    if (confirm('Start a new map? This will clear all territory assignments and reset history. Alliances will be preserved.')) {
+      setCellAssignments({});
+      setHistory([{}]);
+      setHistoryIndex(0);
+      setPlanName('Nova Imperium S2 Plan');
+      setSaveStatus('New map started');
+      setTimeout(() => setSaveStatus(''), 2000);
+    }
+  };
+
   const addAlliance = () => {
     if (!newAllianceName.trim()) return;
     const id = `alliance_${Date.now()}`;
@@ -662,16 +672,6 @@ export default function Season2MapPlanner() {
     return stats;
   }, [cellAssignments, alliances]);
 
-  const shouldHighlight = (cell) => {
-    if (filter === 'all') return true;
-    if (filter === 'food') return cell.bonus.includes('Food');
-    if (filter === 'iron') return cell.bonus.includes('Iron');
-    if (filter === 'coin') return cell.bonus.includes('Coin');
-    if (filter === 'gathering') return cell.bonus.includes('Gathering');
-    if (filter === 'combat') return cell.bonus.includes('Healing') || cell.bonus.includes('Training') || cell.bonus.includes('March');
-    if (filter === 'development') return cell.bonus.includes('Construction') || cell.bonus.includes('Research');
-    return true;
-  };
 
   const getActiveAllianceColor = () => {
     return alliances.find(a => a.id === activeAlliance)?.color || '#00ff88';
@@ -1172,6 +1172,14 @@ export default function Season2MapPlanner() {
             <div className="toolbar-divider" />
             
             <button 
+              className="btn btn-small btn-danger"
+              onClick={startNewMap}
+              title="Start a new map"
+            >
+              🆕 New Map
+            </button>
+            
+            <button 
               className="btn btn-small"
               onClick={() => setShowImportExport(true)}
             >
@@ -1323,26 +1331,6 @@ export default function Season2MapPlanner() {
             </div>
           )}
 
-          {!screenshotMode && (
-            <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ marginRight: '4px', fontWeight: 600, fontSize: '12px' }}>Filter:</span>
-              {['all', 'food', 'iron', 'coin', 'gathering', 'combat', 'development'].map(f => (
-                <button
-                  key={f}
-                  className={`btn ${filter === f ? 'active' : ''}`}
-                  onClick={() => setFilter(f)}
-                  style={{ 
-                    fontSize: '11px', 
-                    padding: '4px 10px',
-                    borderColor: filter === f ? '#00ff88' : undefined,
-                    color: filter === f ? '#00ff88' : undefined,
-                  }}
-                >
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                </button>
-              ))}
-            </div>
-          )}
 
           <div className="map-grid">
             {mapData.map((row, rowIdx) =>
@@ -1352,7 +1340,6 @@ export default function Season2MapPlanner() {
                 const alliance = alliances.find(a => a.id === assignedAlliance);
                 const config = typeConfig[cell.type];
                 const lvlColor = levelColors[cell.lvl] || levelColors[1];
-                const highlighted = shouldHighlight(cell);
                 const isOptimized = highlightOptimized.has(key);
                 
                 // Calculate colors based on accessibility mode
@@ -1410,7 +1397,7 @@ export default function Season2MapPlanner() {
                 return (
                   <div
                     key={key}
-                    className={`cell ${!highlighted ? 'dimmed' : ''} ${isOptimized ? 'optimized' : ''}`}
+                    className={`cell ${isOptimized ? 'optimized' : ''}`}
                     style={cellStyle}
                     onClick={() => !screenshotMode && toggleCell(rowIdx, colIdx)}
                     onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
