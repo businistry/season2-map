@@ -264,7 +264,8 @@ export default function Season2MapPlanner() {
       }
       
       try {
-        const roomRef = doc(db, 'rooms', ROOM_ID);
+        const roomId = getRoomId(currentServerId);
+        const roomRef = doc(db, 'rooms', roomId);
         
         // Try to load existing data
         const docSnap = await getDoc(roomRef);
@@ -1412,10 +1413,108 @@ export default function Season2MapPlanner() {
         </header>
       )}
 
+      {/* Server Selection Modal */}
+      {showServerModal && (
+        <div className="modal-overlay" onClick={() => {}}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ minWidth: '400px' }}>
+            <h3 style={{ marginTop: 0, fontFamily: '"Orbitron", monospace' }}>🌐 Select Server</h3>
+            <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+              Choose a server or create a new one. Each server has its own isolated map.
+            </p>
+            
+            {servers.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', fontWeight: 600 }}>Existing Servers</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
+                  {servers.map(server => (
+                    <div key={server.id} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px',
+                      padding: '8px',
+                      background: currentServerId === server.id ? 'rgba(0,255,136,0.1)' : 'rgba(255,255,255,0.05)',
+                      borderRadius: '6px',
+                      border: currentServerId === server.id ? '1px solid rgba(0,255,136,0.3)' : '1px solid transparent',
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600 }}>{server.name}</div>
+                        <div style={{ fontSize: '10px', color: '#888' }}>ID: {server.id}</div>
+                      </div>
+                      <button
+                        className="btn btn-small"
+                        onClick={() => switchServer(server.id)}
+                        style={{ background: currentServerId === server.id ? '#2a5a2a' : '#3a3a4a' }}
+                      >
+                        {currentServerId === server.id ? '✓ Active' : 'Select'}
+                      </button>
+                      <button
+                        className="btn btn-small btn-danger"
+                        onClick={() => deleteServer(server.id)}
+                        style={{ padding: '4px 8px' }}
+                        title="Delete server"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '16px' }}>
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', fontWeight: 600 }}>Create New Server</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Server Name</label>
+                  <input
+                    className="input"
+                    value={newServerName}
+                    onChange={e => setNewServerName(e.target.value)}
+                    placeholder="e.g. Server 1642"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Server ID (unique identifier)</label>
+                  <input
+                    className="input"
+                    value={newServerId}
+                    onChange={e => setNewServerId(e.target.value)}
+                    placeholder="e.g. server-1642"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>
+                    Use lowercase letters, numbers, and hyphens only
+                  </div>
+                </div>
+                <button 
+                  className="btn btn-success" 
+                  onClick={addServer}
+                  style={{ width: '100%' }}
+                >
+                  ➕ Create Server
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar - hidden in screenshot mode */}
-      {!screenshotMode && (
+      {!screenshotMode && currentServerId && (
         <div style={{ maxWidth: '850px', margin: '0 auto 16px' }}>
           <div className="toolbar">
+            <button 
+              className="btn btn-small"
+              onClick={() => setShowServerModal(true)}
+              style={{ background: '#2a3a4a' }}
+              title="Switch server"
+            >
+              🌐 {servers.find(s => s.id === currentServerId)?.name || 'Server'}
+            </button>
+            
+            <div className="toolbar-divider" />
+            
             <button 
               className="btn btn-small" 
               onClick={undo} 
