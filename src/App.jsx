@@ -718,6 +718,100 @@ export default function Season2MapPlanner() {
     setTimeout(() => setSaveStatus(''), 2000);
   };
 
+  // Refresh and clean up stale users
+  const refreshUsers = async () => {
+    if (!useFirebase || !db || !isConnected) {
+      setSaveStatus('Not connected to Firebase');
+      setTimeout(() => setSaveStatus(''), 2000);
+      return;
+    }
+
+    try {
+      const presenceQuery = query(
+        collection(db, PRESENCE_COLLECTION),
+        where('roomId', '==', ROOM_ID)
+      );
+      
+      const snapshot = await getDocs(presenceQuery);
+      const now = new Date();
+      const staleThreshold = 120000; // 2 minutes
+      let cleanedCount = 0;
+
+      snapshot.forEach(async (docSnap) => {
+        const data = docSnap.data();
+        const lastSeen = data.lastSeen?.toDate() || new Date();
+        const timeSinceSeen = now - lastSeen;
+
+        // Mark users offline if they haven't been seen in 2 minutes
+        if (timeSinceSeen > staleThreshold && data.online) {
+          try {
+            await updateDoc(doc(db, PRESENCE_COLLECTION, docSnap.id), {
+              online: false,
+            });
+            cleanedCount++;
+          } catch (e) {
+            console.error('Failed to clean user:', e);
+          }
+        }
+      });
+
+      setSaveStatus(`Refreshed users - cleaned ${cleanedCount} stale entries`);
+      setTimeout(() => setSaveStatus(''), 3000);
+    } catch (error) {
+      console.error('Failed to refresh users:', error);
+      setSaveStatus('Failed to refresh users');
+      setTimeout(() => setSaveStatus(''), 2000);
+    }
+  };
+
+  // Admin function to clear all user presence (force cleanup)
+  const clearAllUsers = async () => {
+    if (!isAdmin) {
+      alert('Admin access required');
+      return;
+    }
+
+    if (!confirm('Clear all user presence records? This will remove all users from the active list.')) {
+      return;
+    }
+
+    if (!useFirebase || !db || !isConnected) {
+      setSaveStatus('Not connected to Firebase');
+      setTimeout(() => setSaveStatus(''), 2000);
+      return;
+    }
+
+    try {
+      const presenceQuery = query(
+        collection(db, PRESENCE_COLLECTION),
+        where('roomId', '==', ROOM_ID)
+      );
+      
+      const snapshot = await getDocs(presenceQuery);
+      let deletedCount = 0;
+
+      snapshot.forEach(async (docSnap) => {
+        // Don't delete current user
+        if (docSnap.id !== USER_ID) {
+          try {
+            await deleteDoc(doc(db, PRESENCE_COLLECTION, docSnap.id));
+            deletedCount++;
+          } catch (e) {
+            console.error('Failed to delete user:', e);
+          }
+        }
+      });
+
+      setActiveUsers([]);
+      setSaveStatus(`Cleared ${deletedCount} user records`);
+      setTimeout(() => setSaveStatus(''), 3000);
+    } catch (error) {
+      console.error('Failed to clear users:', error);
+      setSaveStatus('Failed to clear users');
+      setTimeout(() => setSaveStatus(''), 2000);
+    }
+  };
+
   const startNewMap = async () => {
     if (!confirm('Start a new map? This will clear all territory assignments and reset history. Alliances will be preserved.')) {
       return;
