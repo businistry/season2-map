@@ -84,8 +84,23 @@ const ADMIN_PASSWORD_KEY = 'lastwar-s2-admin-password';
 const DEFAULT_ADMIN_PASSWORD = 'admin123'; // Change this to your desired password
 
 // Firebase configuration
-const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances
+const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances (fallback)
 const PRESENCE_COLLECTION = 'presence'; // Track active users
+
+// Server-based key helpers
+const getRoomId = (serverId) => {
+  if (!serverId || serverId === 'undefined' || serverId === 'null') {
+    return ROOM_ID;
+  }
+  return `room-${serverId}`;
+};
+
+const getStorageKey = (serverId) => {
+  if (!serverId || serverId === 'undefined' || serverId === 'null') {
+    return STORAGE_KEY;
+  }
+  return `${STORAGE_KEY}-${serverId}`;
+};
 
 // Generate unique user ID for this session (safe access)
 const getUserId = () => {
@@ -186,6 +201,50 @@ export default function Season2MapPlanner() {
   const presenceUnsubscribeRef = useRef(null);
   const lastUpdateRef = useRef(Date.now());
   const userNameRef = useRef(USER_NAME);
+  const isResettingRef = useRef(false);
+  
+  // Server management state
+  const [servers, setServers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lastwar-s2-servers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : [{ id: 'default', name: 'Server 1642' }];
+      }
+    } catch (e) {
+      console.error('Failed to load servers:', e);
+    }
+    return [{ id: 'default', name: 'Server 1642' }];
+  });
+  const [currentServerId, setCurrentServerId] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lastwar-s2-current-server');
+      const serversList = (() => {
+        try {
+          const savedServers = localStorage.getItem('lastwar-s2-servers');
+          if (savedServers) {
+            const parsed = JSON.parse(savedServers);
+            return Array.isArray(parsed) && parsed.length > 0 ? parsed : [{ id: 'default', name: 'Server 1642' }];
+          }
+        } catch (e) {
+          console.error('Failed to load servers:', e);
+        }
+        return [{ id: 'default', name: 'Server 1642' }];
+      })();
+      
+      // Ensure the saved server ID exists in the servers list
+      if (saved && serversList.some(s => s.id === saved)) {
+        return saved;
+      }
+      // Default to first server in list
+      return serversList[0]?.id || 'default';
+    } catch (e) {
+      return 'default';
+    }
+  });
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [newServerName, setNewServerName] = useState('');
+  const [newServerId, setNewServerId] = useState('');
   
   // Prompt for user name on first Firebase connection (defer to avoid blocking render)
   useEffect(() => {
@@ -211,7 +270,7 @@ export default function Season2MapPlanner() {
     if (!useFirebase || !dbAvailable) {
       // Fallback to localStorage
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = localStorage.getItem(getStorageKey(currentServerId));
         if (saved) {
           const data = JSON.parse(saved);
           if (data.version === STORAGE_VERSION) {
@@ -369,7 +428,7 @@ export default function Season2MapPlanner() {
         await setDoc(presenceRef, {
           userId: USER_ID,
           userName: currentUserName,
-          roomId: ROOM_ID,
+          roomId: getRoomId(currentServerId),
           lastSeen: serverTimestamp(),
           online: true,
         });
@@ -391,7 +450,7 @@ export default function Season2MapPlanner() {
         // Listen for other users' presence
         const presenceQuery = query(
           collection(db, PRESENCE_COLLECTION),
-          where('roomId', '==', ROOM_ID),
+          where('roomId', '==', getRoomId(currentServerId)),
           where('online', '==', true)
         );
         
@@ -427,7 +486,7 @@ export default function Season2MapPlanner() {
         
         // Fallback to localStorage
         try {
-          const saved = localStorage.getItem(STORAGE_KEY);
+          const saved = localStorage.getItem(getStorageKey(currentServerId));
           if (saved) {
             const data = JSON.parse(saved);
             if (data.version === STORAGE_VERSION) {
@@ -460,7 +519,37 @@ export default function Season2MapPlanner() {
         presenceUnsubscribeRef.current();
       }
     };
-  }, [useFirebase]);
+  }, [useFirebase, currentServerId]);
+
+  // Persist servers to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('lastwar-s2-servers', JSON.stringify(servers));
+    } catch (e) {
+      console.error('Failed to save servers:', e);
+    }
+  }, [servers]);
+
+  // Persist current server ID and ensure it's valid
+  useEffect(() => {
+    // Ensure currentServerId matches a valid server
+    if (servers.length > 0 && !servers.some(s => s.id === currentServerId)) {
+      // Current server ID is invalid, switch to first available
+      const firstServerId = servers[0].id;
+      setCurrentServerId(firstServerId);
+      try {
+        localStorage.setItem('lastwar-s2-current-server', firstServerId);
+      } catch (e) {
+        console.error('Failed to save current server:', e);
+      }
+    } else {
+      try {
+        localStorage.setItem('lastwar-s2-current-server', currentServerId);
+      } catch (e) {
+        console.error('Failed to save current server:', e);
+      }
+    }
+  }, [currentServerId, servers]);
 
   // Auto-save to Firebase or localStorage whenever data changes
   useEffect(() => {
@@ -481,7 +570,7 @@ export default function Season2MapPlanner() {
         if (useFirebase && db && isConnected) {
           // Save to Firebase
           try {
-            const roomRef = doc(db, 'rooms', ROOM_ID);
+            const roomRef = doc(db, 'rooms', getRoomId(currentServerId));
             lastUpdateRef.current = Date.now();
             await setDoc(roomRef, {
               ...data,
@@ -493,13 +582,13 @@ export default function Season2MapPlanner() {
           } catch (firebaseError) {
             console.error('Firebase save failed, falling back to localStorage:', firebaseError);
             // Fallback to localStorage
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
             setLastSaved(new Date());
             setSaveStatus('Saved locally (Firebase error)');
           }
         } else {
           // Save to localStorage
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
           setLastSaved(new Date());
           setSaveStatus('Auto-saved');
         }
@@ -515,7 +604,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected]);
+  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -588,7 +677,7 @@ export default function Season2MapPlanner() {
   // Clear all saved data
   const clearSavedData = () => {
     if (confirm('Are you sure you want to clear all saved data? This cannot be undone.')) {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(getStorageKey(currentServerId));
       setAlliances(defaultAlliances);
       setCellAssignments({});
       setActiveAlliance('nova');
@@ -718,7 +807,7 @@ export default function Season2MapPlanner() {
     try {
       const presenceQuery = query(
         collection(db, PRESENCE_COLLECTION),
-        where('roomId', '==', ROOM_ID)
+        where('roomId', '==', getRoomId(currentServerId))
       );
       
       const snapshot = await getDocs(presenceQuery);
@@ -773,7 +862,7 @@ export default function Season2MapPlanner() {
     try {
       const presenceQuery = query(
         collection(db, PRESENCE_COLLECTION),
-        where('roomId', '==', ROOM_ID)
+        where('roomId', '==', getRoomId(currentServerId))
       );
       
       const snapshot = await getDocs(presenceQuery);
@@ -821,8 +910,8 @@ export default function Season2MapPlanner() {
     // Force update Firebase to override any other users' states
     if (useFirebase && db && isConnected) {
       try {
-        const roomRef = doc(db, 'rooms', ROOM_ID);
-        lastUpdateRef.current = resetTimestamp; // Set update time to prevent overwrite
+        const roomRef = doc(db, 'rooms', getRoomId(currentServerId));
+        lastUpdateRef.current = resetTimestamp + 5000; // Set far in future to prevent overwrite
         await setDoc(roomRef, {
           version: STORAGE_VERSION,
           planName: 'Nova Imperium S2 Plan',
@@ -850,11 +939,95 @@ export default function Season2MapPlanner() {
         resetTimestamp: resetTimestamp,
         savedAt: new Date().toISOString(),
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
       setSaveStatus('New map created locally');
     }
     
     setTimeout(() => setSaveStatus(''), 2000);
+  };
+
+  // Server management functions
+  const switchServer = (serverId) => {
+    if (serverId === currentServerId) return;
+    setCurrentServerId(serverId);
+    try {
+      localStorage.setItem('lastwar-s2-current-server', serverId);
+    } catch (e) {
+      console.error('Failed to save current server:', e);
+    }
+    // Reload data for the new server
+    window.location.reload(); // Simple approach - reload to reinitialize with new server
+  };
+
+  const addServer = () => {
+    if (!newServerName.trim() || !newServerId.trim()) {
+      alert('Please enter both server name and ID');
+      return;
+    }
+    
+    // Validate server ID (lowercase, numbers, hyphens only)
+    if (!/^[a-z0-9-]+$/.test(newServerId)) {
+      alert('Server ID can only contain lowercase letters, numbers, and hyphens');
+      return;
+    }
+    
+    // Check if ID already exists
+    if (servers.some(s => s.id === newServerId)) {
+      alert('A server with this ID already exists');
+      return;
+    }
+    
+    const newServer = {
+      id: newServerId.trim(),
+      name: newServerName.trim(),
+    };
+    
+    const updatedServers = [...servers, newServer];
+    setServers(updatedServers);
+    try {
+      localStorage.setItem('lastwar-s2-servers', JSON.stringify(updatedServers));
+    } catch (e) {
+      console.error('Failed to save servers:', e);
+    }
+    
+    setNewServerName('');
+    setNewServerId('');
+    setCurrentServerId(newServerId);
+    try {
+      localStorage.setItem('lastwar-s2-current-server', newServerId);
+    } catch (e) {
+      console.error('Failed to save current server:', e);
+    }
+    
+    setShowServerModal(false);
+    // Reload to initialize with new server
+    window.location.reload();
+  };
+
+  const deleteServer = (serverId) => {
+    if (servers.length <= 1) {
+      alert('You must have at least one server');
+      return;
+    }
+    
+    if (!confirm(`Delete server "${servers.find(s => s.id === serverId)?.name}"? This will also delete all saved data for this server.`)) {
+      return;
+    }
+    
+    const updatedServers = servers.filter(s => s.id !== serverId);
+    setServers(updatedServers);
+    try {
+      localStorage.setItem('lastwar-s2-servers', JSON.stringify(updatedServers));
+      // Also clear the server's data
+      localStorage.removeItem(getStorageKey(serverId));
+    } catch (e) {
+      console.error('Failed to delete server:', e);
+    }
+    
+    // If deleting current server, switch to first available
+    if (serverId === currentServerId && updatedServers.length > 0) {
+      switchServer(updatedServers[0].id);
+    }
   };
 
   const addAlliance = () => {
