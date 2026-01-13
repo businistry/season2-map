@@ -742,7 +742,7 @@ export default function Season2MapPlanner() {
     try {
       const presenceQuery = query(
         collection(db, PRESENCE_COLLECTION),
-        where('roomId', '==', ROOM_ID)
+        where('roomId', '==', getRoomId(currentServerId))
       );
       
       const snapshot = await getDocs(presenceQuery);
@@ -797,7 +797,7 @@ export default function Season2MapPlanner() {
     try {
       const presenceQuery = query(
         collection(db, PRESENCE_COLLECTION),
-        where('roomId', '==', ROOM_ID)
+        where('roomId', '==', getRoomId(currentServerId))
       );
       
       const snapshot = await getDocs(presenceQuery);
@@ -849,7 +849,7 @@ export default function Season2MapPlanner() {
     // Force update Firebase to override any other users' states
     if (useFirebase && db && isConnected) {
       try {
-        const roomRef = doc(db, 'rooms', ROOM_ID);
+        const roomRef = doc(db, 'rooms', getRoomId(currentServerId));
         lastUpdateRef.current = resetTimestamp + 5000; // Set far in future to prevent overwrite
         await setDoc(roomRef, {
           version: STORAGE_VERSION,
@@ -884,7 +884,7 @@ export default function Season2MapPlanner() {
         resetTimestamp: resetTimestamp,
         savedAt: new Date().toISOString(),
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
       setSaveStatus('New map created locally');
       isResettingRef.current = false;
     }
