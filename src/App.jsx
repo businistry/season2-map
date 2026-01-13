@@ -562,6 +562,15 @@ export default function Season2MapPlanner() {
 
   const toggleCell = (row, col) => {
     const key = `${row}-${col}`;
+    const currentAssignment = cellAssignments[key];
+    const currentAlliance = alliances.find(a => a.id === currentAssignment);
+    
+    // Check if tile is locked (and user is not admin)
+    if (currentAssignment && lockedAlliances.has(currentAssignment) && !isAdmin) {
+      alert(`This tile is locked by ${currentAlliance?.name || 'an alliance'}. Admin access required to modify.`);
+      return;
+    }
+    
     const newAssignments = { ...cellAssignments };
     
     if (newAssignments[key] === activeAlliance) {
