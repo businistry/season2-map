@@ -1391,10 +1391,8 @@ export default function Season2MapPlanner() {
                     <span 
                       className="cell-type" 
                       style={{ 
-                        color: accessibilityMode ? textColor : undefined,
-                        textShadow: accessibilityMode 
-                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
-                          : '0 0 2px rgba(0,0,0,0.8)'
+                        color: accessibilityMode ? textColor : '#ffffff',
+                        fontWeight: '600'
                       }}
                     >
                       {config.name}
@@ -1402,10 +1400,8 @@ export default function Season2MapPlanner() {
                     <span 
                       className="cell-level" 
                       style={{ 
-                        color: accessibilityMode ? textColor : undefined,
-                        textShadow: accessibilityMode 
-                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
-                          : '0 0 2px rgba(0,0,0,0.8)'
+                        color: accessibilityMode ? textColor : '#ffffff',
+                        fontWeight: '700'
                       }}
                     >
                       L{cell.lvl}
@@ -1415,10 +1411,7 @@ export default function Season2MapPlanner() {
                         className="cell-tag" 
                         style={{ 
                           color: tagColor,
-                          textShadow: accessibilityMode 
-                            ? (tagColor === '#ffffff' ? '0 0 3px rgba(0,0,0,0.9)' : '0 0 3px rgba(255,255,255,0.9)')
-                            : '0 0 2px rgba(0,0,0,0.8)',
-                          fontWeight: accessibilityMode ? '900' : '700'
+                          fontWeight: '700'
                         }}
                       >
                         {alliance.tag}
