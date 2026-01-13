@@ -78,18 +78,50 @@ const defaultAlliances = [
   { id: 'enemy', name: 'Enemy', color: '#ff4444', tag: 'ENM' },
 ];
 
+const STORAGE_KEY = 'lastwar-s2-planner-data';
 const STORAGE_VERSION = 1;
 const ADMIN_PASSWORD_KEY = 'lastwar-s2-admin-password';
 const DEFAULT_ADMIN_PASSWORD = 'admin123'; // Change this to your desired password
-const SERVERS_STORAGE_KEY = 'lastwar-s2-servers'; // Store list of servers
-const CURRENT_SERVER_KEY = 'lastwar-s2-current-server'; // Store currently selected server
+
+// Server management constants
+const SERVERS_STORAGE_KEY = 'lastwar-s2-servers';
+const CURRENT_SERVER_KEY = 'lastwar-s2-current-server';
+const DEFAULT_SERVERS = [{ id: 'default', name: 'Server 1642' }];
+
+// Safe localStorage helpers
+const safeGet = (key) => {
+  try { return localStorage.getItem(key); } catch { return null; }
+};
+
+const safeSet = (key, value) => {
+  try { localStorage.setItem(key, value); } catch {}
+};
+
+const safeRemove = (key) => {
+  try { localStorage.removeItem(key); } catch {}
+};
+
+const sanitizeServerId = (raw) =>
+  raw.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
 
 // Firebase configuration
+const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances (fallback)
 const PRESENCE_COLLECTION = 'presence'; // Track active users
 
-// Helper functions for server-based storage
-const getStorageKey = (serverId) => `lastwar-s2-planner-data-${serverId}`;
-const getRoomId = (serverId) => `season2-plan-${serverId}`;
+// Server-based key helpers
+const getRoomId = (serverId) => {
+  if (!serverId || serverId === 'undefined' || serverId === 'null') {
+    return ROOM_ID;
+  }
+  return `room-${serverId}`;
+};
+
+const getStorageKey = (serverId) => {
+  if (!serverId || serverId === 'undefined' || serverId === 'null') {
+    return STORAGE_KEY;
+  }
+  return `${STORAGE_KEY}-${serverId}`;
+};
 
 // Generate unique user ID for this session (safe access)
 const getUserId = () => {
@@ -167,13 +199,6 @@ export default function Season2MapPlanner() {
   const [optimizerMaxLevel, setOptimizerMaxLevel] = useState(6);
   const [optimizerResults, setOptimizerResults] = useState(null);
 
-  // Server selection state
-  const [servers, setServers] = useState([]);
-  const [currentServerId, setCurrentServerId] = useState(null);
-  const [showServerModal, setShowServerModal] = useState(false);
-  const [newServerName, setNewServerName] = useState('');
-  const [newServerId, setNewServerId] = useState('');
-  
   // Persistence state
   const [lastSaved, setLastSaved] = useState(null);
   const [saveStatus, setSaveStatus] = useState('');
@@ -187,7 +212,6 @@ export default function Season2MapPlanner() {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const lastResetTimestampRef = useRef(0);
-  const isResettingRef = useRef(false);
   
   // Firebase/Real-time collaboration state
   const [isConnected, setIsConnected] = useState(false);
@@ -198,6 +222,25 @@ export default function Season2MapPlanner() {
   const presenceUnsubscribeRef = useRef(null);
   const lastUpdateRef = useRef(Date.now());
   const userNameRef = useRef(USER_NAME);
+  const isResettingRef = useRef(false);
+  
+  // Server management state - lazy initialization from localStorage
+  const [servers, setServers] = useState(() => {
+    try {
+      const raw = safeGet(SERVERS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_SERVERS;
+    } catch {
+      return DEFAULT_SERVERS;
+    }
+  });
+  const [currentServerId, setCurrentServerId] = useState(() => {
+    const saved = safeGet(CURRENT_SERVER_KEY);
+    return saved || 'default';
+  });
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [newServerName, setNewServerName] = useState('');
+  const [newServerId, setNewServerId] = useState('');
   
   // Prompt for user name on first Firebase connection (defer to avoid blocking render)
   useEffect(() => {
@@ -217,14 +260,15 @@ export default function Season2MapPlanner() {
 
   // Initialize Firebase connection and load data
   useEffect(() => {
+    if (!currentServerId) return; // Don't run until server is initialized
+    
     // Check if db is available (Firebase might not be initialized)
     const dbAvailable = db !== null && db !== undefined;
     
     if (!useFirebase || !dbAvailable) {
       // Fallback to localStorage
       try {
-        const storageKey = getStorageKey(currentServerId);
-        const saved = localStorage.getItem(storageKey);
+        const saved = localStorage.getItem(getStorageKey(currentServerId));
         if (saved) {
           const data = JSON.parse(saved);
           if (data.version === STORAGE_VERSION) {
@@ -410,29 +454,15 @@ export default function Season2MapPlanner() {
         
         presenceUnsubscribeRef.current = onSnapshot(presenceQuery, (snapshot) => {
           const users = [];
-          const now = new Date();
-          const staleThreshold = 120000; // 2 minutes in milliseconds
-          
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
+          snapshot.forEach((doc) => {
+            const data = doc.data();
             // Exclude current user
             if (data.userId !== USER_ID) {
-              const lastSeen = data.lastSeen?.toDate() || new Date();
-              const timeSinceSeen = now - lastSeen;
-              
-              // Only include users seen in the last 2 minutes
-              if (timeSinceSeen < staleThreshold) {
-                users.push({
-                  id: data.userId,
-                  name: data.userName || 'Anonymous',
-                  lastSeen: lastSeen,
-                });
-              } else {
-                // Mark stale users as offline
-                updateDoc(doc(db, PRESENCE_COLLECTION, data.userId), {
-                  online: false,
-                }).catch(() => {});
-              }
+              users.push({
+                id: data.userId,
+                name: data.userName || 'Anonymous',
+                lastSeen: data.lastSeen?.toDate() || new Date(),
+              });
             }
           });
           setActiveUsers(users);
@@ -489,10 +519,16 @@ export default function Season2MapPlanner() {
     };
   }, [useFirebase, currentServerId]);
 
+  // Keep localStorage in sync if someone edits it externally
+  useEffect(() => {
+    // heal empty state if something cleared localStorage
+    if (!servers || servers.length === 0) setServers(DEFAULT_SERVERS);
+    if (!currentServerId) setCurrentServerId('default');
+  }, [servers, currentServerId]);
+
   // Auto-save to Firebase or localStorage whenever data changes
   useEffect(() => {
     if (!isLoaded) return; // Don't save until initial load is complete
-    if (isResettingRef.current) return; // Don't auto-save during a reset
     
     const saveData = async () => {
       try {
@@ -505,11 +541,6 @@ export default function Season2MapPlanner() {
           lockedAlliances: Array.from(lockedAlliances),
           savedAt: new Date().toISOString(),
         };
-
-        // Preserve reset timestamp if it exists
-        if (lastResetTimestampRef.current > 0) {
-          data.resetTimestamp = lastResetTimestampRef.current;
-        }
 
         if (useFirebase && db && isConnected) {
           // Save to Firebase
@@ -548,7 +579,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, lockedAlliances, isLoaded, useFirebase, isConnected]);
+  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -663,6 +694,15 @@ export default function Season2MapPlanner() {
 
   const toggleCell = (row, col) => {
     const key = `${row}-${col}`;
+    const currentAssignment = cellAssignments[key];
+    const currentAlliance = alliances.find(a => a.id === currentAssignment);
+    
+    // Check if tile is locked (and user is not admin)
+    if (currentAssignment && lockedAlliances.has(currentAssignment) && !isAdmin) {
+      alert(`This tile is locked by ${currentAlliance?.name || 'an alliance'}. Admin access required to modify.`);
+      return;
+    }
+    
     const newAssignments = { ...cellAssignments };
     
     if (newAssignments[key] === activeAlliance) {
@@ -834,10 +874,6 @@ export default function Season2MapPlanner() {
     const emptyAssignments = {};
     const emptyHistory = [{}];
     
-    // Set resetting flag to prevent auto-save from interfering
-    isResettingRef.current = true;
-    lastResetTimestampRef.current = resetTimestamp;
-    
     // Update local state immediately
     setCellAssignments(emptyAssignments);
     setHistory(emptyHistory);
@@ -862,15 +898,9 @@ export default function Season2MapPlanner() {
           updatedAt: serverTimestamp(),
         }, { merge: false }); // Use merge: false to completely replace
         setSaveStatus('New map created - forcing reset for all users');
-        
-        // Keep resetting flag for 3 seconds to prevent auto-save interference
-        setTimeout(() => {
-          isResettingRef.current = false;
-        }, 3000);
       } catch (error) {
         console.error('Failed to reset map in Firebase:', error);
         setSaveStatus('New map created locally');
-        isResettingRef.current = false;
       }
     } else {
       // localStorage fallback
@@ -886,10 +916,83 @@ export default function Season2MapPlanner() {
       };
       localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
       setSaveStatus('New map created locally');
-      isResettingRef.current = false;
     }
     
     setTimeout(() => setSaveStatus(''), 2000);
+  };
+
+  // Server management functions
+  // Server management functions
+  const persistServers = (nextServers, nextCurrentId) => {
+    safeSet(SERVERS_STORAGE_KEY, JSON.stringify(nextServers));
+    safeSet(CURRENT_SERVER_KEY, nextCurrentId);
+  };
+
+  const switchServer = (serverId) => {
+    if (!serverId) return;
+
+    // reset connection flags so UI reflects switching immediately
+    setIsLoaded(false);
+    setIsConnecting(true);
+    setIsConnected(false);
+    setActiveUsers([]);
+    setSaveStatus(`Switching to ${serverId}...`);
+
+    setCurrentServerId(serverId);
+    safeSet(CURRENT_SERVER_KEY, serverId);
+    setShowServerModal(false);
+  };
+
+  const addServer = () => {
+    const name = newServerName.trim();
+    const id = sanitizeServerId(newServerId.trim());
+
+    if (!name || !id) {
+      alert('Please enter a server name and a valid server ID.');
+      return;
+    }
+
+    if (servers.some(s => s.id === id)) {
+      alert('That Server ID already exists. Choose a unique ID.');
+      return;
+    }
+
+    const nextServers = [...servers, { id, name }];
+    setServers(nextServers);
+    persistServers(nextServers, id);
+
+    setNewServerName('');
+    setNewServerId('');
+
+    switchServer(id);
+  };
+
+  const deleteServer = (serverId) => {
+    if (!serverId) return;
+    if (serverId === 'default') {
+      alert('The default server cannot be deleted.');
+      return;
+    }
+
+    const server = servers.find(s => s.id === serverId);
+    const ok = confirm(`Delete "${server?.name || serverId}"? This will clear its local map data in this browser.`);
+    if (!ok) return;
+
+    // remove local saved plan for that server
+    safeRemove(getStorageKey(serverId));
+
+    const nextServers = servers.filter(s => s.id !== serverId);
+    const fallbackId = nextServers[0]?.id || 'default';
+
+    // if we deleted the active server, switch
+    const nextCurrent = currentServerId === serverId ? fallbackId : currentServerId;
+
+    setServers(nextServers.length ? nextServers : DEFAULT_SERVERS);
+    persistServers(nextServers.length ? nextServers : DEFAULT_SERVERS, nextCurrent);
+
+    if (currentServerId === serverId) {
+      switchServer(nextCurrent);
+    }
   };
 
   const addAlliance = () => {
@@ -1061,9 +1164,9 @@ export default function Season2MapPlanner() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#1a1a2e',
+      background: 'linear-gradient(135deg, #0a0a12 0%, #1a1a2e 50%, #16213e 100%)',
       color: '#e0e0e0',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
+      fontFamily: '"Rajdhani", "Segoe UI", sans-serif',
       padding: screenshotMode ? '40px' : '20px',
     }}>
       <style>{`
@@ -1072,26 +1175,28 @@ export default function Season2MapPlanner() {
         .map-grid { 
           display: grid;
           grid-template-columns: repeat(13, 1fr);
-          gap: 4px;
-          max-width: 1000px;
+          gap: 3px;
+          max-width: 850px;
           margin: 0 auto;
         }
         
         .cell {
           aspect-ratio: 1;
-          border-radius: 4px;
+          border-radius: 6px;
           cursor: pointer;
+          transition: all 0.2s ease;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          font-size: 14px;
+          font-size: 10px;
           position: relative;
           overflow: hidden;
         }
         
         .cell:hover {
-          opacity: 0.8;
+          transform: scale(1.15);
+          z-index: 10;
         }
         
         .cell.dimmed {
@@ -1109,51 +1214,55 @@ export default function Season2MapPlanner() {
         
         .cell-tag {
           position: absolute;
-          bottom: 2px;
-          font-size: 10px;
+          bottom: 1px;
+          font-size: 6px;
           font-weight: 700;
+          letter-spacing: -0.5px;
+          text-shadow: 0 0 2px rgba(0,0,0,0.8);
         }
         
         .cell-icon {
-          font-size: 18px;
+          font-size: 14px;
           line-height: 1;
         }
         
         .cell-level {
-          font-size: 12px;
+          font-size: 7px;
           font-weight: 700;
+          opacity: 0.9;
         }
         
         .cell-type {
-          font-size: 11px;
+          font-size: 7px;
           font-weight: 600;
           text-align: center;
-          line-height: 1.2;
-          margin-bottom: 2px;
+          line-height: 1.1;
+          margin-bottom: 1px;
         }
         
         .panel {
-          background: #2a2a3e;
-          border: 2px solid rgba(255,255,255,0.2);
-          border-radius: 8px;
-          padding: 20px;
+          background: rgba(20, 20, 35, 0.95);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 12px;
+          padding: 16px;
+          backdrop-filter: blur(10px);
         }
         
         .btn {
-          background: #3a3a4a;
-          border: 2px solid rgba(255,255,255,0.3);
+          background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
+          border: 1px solid rgba(255,255,255,0.2);
           color: #e0e0e0;
-          padding: 12px 20px;
-          border-radius: 6px;
+          padding: 8px 16px;
+          border-radius: 8px;
           cursor: pointer;
+          transition: all 0.2s;
           font-family: inherit;
-          font-size: 16px;
-          font-weight: 600;
+          font-size: 12px;
         }
         
         .btn:hover {
-          background: #4a4a5a;
-          border-color: rgba(255,255,255,0.5);
+          background: linear-gradient(135deg, #3a3a5a 0%, #2a2a3e 100%);
+          border-color: rgba(255,255,255,0.4);
         }
         
         .btn:disabled {
@@ -1166,26 +1275,28 @@ export default function Season2MapPlanner() {
         }
         
         .btn-small {
-          padding: 8px 12px;
-          font-size: 14px;
+          padding: 4px 8px;
+          font-size: 11px;
         }
         
         .btn-danger {
-          background: #5a2a2a;
-          border-color: rgba(255,100,100,0.5);
+          background: linear-gradient(135deg, #4a2a2a 0%, #2e1a1a 100%);
+          border-color: rgba(255,100,100,0.3);
         }
         
         .btn-danger:hover {
-          background: #6a3a3a;
+          background: linear-gradient(135deg, #5a3a3a 0%, #3e2a2a 100%);
+          border-color: rgba(255,100,100,0.5);
         }
         
         .btn-success {
-          background: #2a5a2a;
-          border-color: rgba(100,255,100,0.5);
+          background: linear-gradient(135deg, #2a4a2a 0%, #1a2e1a 100%);
+          border-color: rgba(100,255,100,0.3);
         }
         
         .btn-success:hover {
-          background: #3a6a3a;
+          background: linear-gradient(135deg, #3a5a3a 0%, #2a3e2a 100%);
+          border-color: rgba(100,255,100,0.5);
         }
         
         .tooltip {
@@ -1203,27 +1314,26 @@ export default function Season2MapPlanner() {
         .alliance-btn {
           display: flex;
           align-items: center;
-          gap: 12px;
-          padding: 12px 16px;
-          border-radius: 6px;
+          gap: 8px;
+          padding: 8px 12px;
+          border-radius: 8px;
           cursor: pointer;
+          transition: all 0.2s;
           border: 2px solid transparent;
-          background: rgba(255,255,255,0.1);
-          font-size: 16px;
+          background: rgba(255,255,255,0.05);
         }
         
         .alliance-btn:hover {
-          background: rgba(255,255,255,0.15);
+          background: rgba(255,255,255,0.1);
         }
         
         .alliance-btn.active {
-          background: rgba(255,255,255,0.2);
-          border-color: currentColor;
+          background: rgba(255,255,255,0.15);
         }
         
         .alliance-color {
-          width: 24px;
-          height: 24px;
+          width: 16px;
+          height: 16px;
           border-radius: 4px;
           flex-shrink: 0;
         }
@@ -1396,17 +1506,23 @@ export default function Season2MapPlanner() {
       {!screenshotMode && (
         <header style={{ textAlign: 'center', marginBottom: '20px' }}>
           <h1 style={{
-            fontSize: '2.5rem',
+            fontFamily: '"Orbitron", monospace',
+            fontSize: '2rem',
             fontWeight: 700,
-            color: '#ffd700',
+            background: 'linear-gradient(135deg, #ffd700 0%, #ff8c00 50%, #ff6347 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            textShadow: '0 0 30px rgba(255,215,0,0.3)',
             margin: 0,
           }}>
             POLAR STORM
           </h1>
           <p style={{ 
-            color: '#aaa',
-            fontSize: '1.2rem',
-            marginTop: '8px',
+            fontFamily: '"Orbitron", monospace',
+            color: '#888',
+            fontSize: '0.8rem',
+            letterSpacing: '3px',
+            marginTop: '4px',
           }}>
             SEASON 2 TERRITORY PLANNER
           </p>
@@ -1626,57 +1742,16 @@ export default function Season2MapPlanner() {
               ) : null}
               
               {/* Active Users List */}
-              {isConnected && (
+              {isConnected && activeUsers.length > 0 && (
                 <div style={{ 
                   position: 'relative',
                   fontSize: '10px',
                   color: '#888',
-                  display: 'flex',
-                  gap: '6px',
-                  alignItems: 'center',
                 }}>
-                  {activeUsers.length > 0 && (
-                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                      <span>👥</span>
-                      <span>{activeUsers.map(u => u.name).join(', ')}</span>
-                    </div>
-                  )}
-                  <button
-                    onClick={refreshUsers}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#888',
-                      cursor: 'pointer',
-                      fontSize: '10px',
-                      padding: '2px 4px',
-                      borderRadius: '3px',
-                    }}
-                    title="Refresh user list"
-                    onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
-                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                  >
-                    🔄
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={clearAllUsers}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#ff6666',
-                        cursor: 'pointer',
-                        fontSize: '10px',
-                        padding: '2px 4px',
-                        borderRadius: '3px',
-                      }}
-                      title="Clear all users (Admin only)"
-                      onMouseEnter={(e) => e.target.style.background = 'rgba(255,100,100,0.2)'}
-                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
-                    >
-                      ✕
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                    <span>👥</span>
+                    <span>{activeUsers.map(u => u.name).join(', ')}</span>
+                  </div>
                 </div>
               )}
               
@@ -1863,12 +1938,23 @@ export default function Season2MapPlanner() {
                 }
 
                 const cellStyle = {
-                  background: alliance ? cellColor : cellColor,
-                  border: `3px solid ${borderColor}`,
+                  background: accessibilityMode
+                    ? `${cellColor}`
+                    : alliance 
+                      ? `linear-gradient(135deg, ${cellColor}dd 0%, ${cellColor}99 100%)`
+                      : `linear-gradient(135deg, ${cellColor} 0%, ${cellColor}dd 100%)`,
+                  border: accessibilityMode
+                    ? `${accessibilityPattern.borderWidth} ${accessibilityPattern.borderStyle} ${borderColor}`
+                    : `2px solid ${borderColor}`,
                   borderColor: borderColor,
                   opacity: accessibilityMode ? accessibilityPattern.opacity : 1,
                   filter: accessibilityMode ? 'grayscale(100%) contrast(1.3)' : 'none',
-                  color: accessibilityMode ? textColor : undefined,
+                  boxShadow: accessibilityMode
+                    ? `0 0 4px ${shadowColor}, inset 0 0 2px rgba(0,0,0,0.1)`
+                    : alliance 
+                      ? `0 0 12px ${shadowColor}, inset 0 0 8px rgba(255,255,255,0.2)`
+                      : `0 0 6px ${shadowColor}`,
+                  color: accessibilityMode ? textColor : undefined, // Set text color for accessibility mode
                 };
 
                 return (
@@ -1883,8 +1969,10 @@ export default function Season2MapPlanner() {
                     <span 
                       className="cell-type" 
                       style={{ 
-                        color: accessibilityMode ? textColor : '#ffffff',
-                        fontWeight: '600'
+                        color: accessibilityMode ? textColor : undefined,
+                        textShadow: accessibilityMode 
+                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
+                          : '0 0 2px rgba(0,0,0,0.8)'
                       }}
                     >
                       {config.name}
@@ -1892,8 +1980,10 @@ export default function Season2MapPlanner() {
                     <span 
                       className="cell-level" 
                       style={{ 
-                        color: accessibilityMode ? textColor : '#ffffff',
-                        fontWeight: '700'
+                        color: accessibilityMode ? textColor : undefined,
+                        textShadow: accessibilityMode 
+                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
+                          : '0 0 2px rgba(0,0,0,0.8)'
                       }}
                     >
                       L{cell.lvl}
@@ -1903,7 +1993,10 @@ export default function Season2MapPlanner() {
                         className="cell-tag" 
                         style={{ 
                           color: tagColor,
-                          fontWeight: '700'
+                          textShadow: accessibilityMode 
+                            ? (tagColor === '#ffffff' ? '0 0 3px rgba(0,0,0,0.9)' : '0 0 3px rgba(255,255,255,0.9)')
+                            : '0 0 2px rgba(0,0,0,0.8)',
+                          fontWeight: accessibilityMode ? '900' : '700'
                         }}
                       >
                         {alliance.tag}
