@@ -79,6 +79,8 @@ const defaultAlliances = [
 
 const STORAGE_KEY = 'lastwar-s2-planner-data';
 const STORAGE_VERSION = 1;
+const ADMIN_PASSWORD_KEY = 'lastwar-s2-admin-password';
+const DEFAULT_ADMIN_PASSWORD = 'admin123'; // Change this to your desired password
 
 // Firebase configuration
 const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances
@@ -167,6 +169,12 @@ export default function Season2MapPlanner() {
   const [showImportExport, setShowImportExport] = useState(false);
   const [planName, setPlanName] = useState('Nova Imperium S2 Plan');
   
+  // Tile locking state
+  const [lockedAlliances, setLockedAlliances] = useState(new Set());
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  
   // Firebase/Real-time collaboration state
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -213,6 +221,10 @@ export default function Season2MapPlanner() {
             setHistoryIndex(0);
             setLastSaved(data.savedAt ? new Date(data.savedAt) : null);
             setSaveStatus('Loaded from localStorage');
+            // Load locked alliances
+            if (data.lockedAlliances) {
+              setLockedAlliances(new Set(data.lockedAlliances));
+            }
           }
         }
       } catch (e) {
@@ -258,6 +270,7 @@ export default function Season2MapPlanner() {
             alliances: defaultAlliances,
             cellAssignments: {},
             activeAlliance: 'nova',
+            lockedAlliances: [],
             updatedAt: serverTimestamp(),
           });
           setSaveStatus('Connected - Room created');
@@ -280,6 +293,11 @@ export default function Season2MapPlanner() {
           if (data.version === STORAGE_VERSION) {
             setAlliances(data.alliances || defaultAlliances);
             const newAssignments = data.cellAssignments || {};
+            
+            // Load locked alliances
+            if (data.lockedAlliances) {
+              setLockedAlliances(new Set(data.lockedAlliances));
+            }
             
             // Only update if different (to avoid unnecessary re-renders)
             if (JSON.stringify(newAssignments) !== JSON.stringify(cellAssignments)) {
@@ -412,6 +430,7 @@ export default function Season2MapPlanner() {
           alliances,
           cellAssignments,
           activeAlliance,
+          lockedAlliances: Array.from(lockedAlliances),
           savedAt: new Date().toISOString(),
         };
 
@@ -422,6 +441,7 @@ export default function Season2MapPlanner() {
             lastUpdateRef.current = Date.now();
             await setDoc(roomRef, {
               ...data,
+              lockedAlliances: Array.from(lockedAlliances),
               updatedAt: serverTimestamp(),
             }, { merge: true });
             setLastSaved(new Date());
@@ -461,6 +481,7 @@ export default function Season2MapPlanner() {
       alliances,
       cellAssignments,
       activeAlliance,
+      lockedAlliances: Array.from(lockedAlliances),
       exportedAt: new Date().toISOString(),
       server: '1642',
       season: 'Season 2 - Polar Storm',
@@ -494,12 +515,15 @@ export default function Season2MapPlanner() {
           alert('This file is from a different version and may not be compatible.');
         }
         
-        if (data.alliances) setAlliances(data.alliances);
-        if (data.cellAssignments) {
-          setCellAssignments(data.cellAssignments);
-          setHistory([data.cellAssignments]);
-          setHistoryIndex(0);
-        }
+          if (data.alliances) setAlliances(data.alliances);
+          if (data.cellAssignments) {
+            setCellAssignments(data.cellAssignments);
+            setHistory([data.cellAssignments]);
+            setHistoryIndex(0);
+          }
+          if (data.lockedAlliances) {
+            setLockedAlliances(new Set(data.lockedAlliances));
+          }
         if (data.activeAlliance) setActiveAlliance(data.activeAlliance);
         if (data.planName) setPlanName(data.planName);
         
@@ -574,6 +598,13 @@ export default function Season2MapPlanner() {
   };
 
   const clearAlliance = (allianceId) => {
+    // Check if alliance tiles are locked (and user is not admin)
+    if (lockedAlliances.has(allianceId) && !isAdmin) {
+      const alliance = alliances.find(a => a.id === allianceId);
+      alert(`Tiles for ${alliance?.name || 'this alliance'} are locked. Admin access required to clear.`);
+      return;
+    }
+    
     const newAssignments = { ...cellAssignments };
     Object.keys(newAssignments).forEach(key => {
       if (newAssignments[key] === allianceId) {
@@ -584,7 +615,43 @@ export default function Season2MapPlanner() {
   };
 
   const clearAll = () => {
+    if (lockedAlliances.size > 0 && !isAdmin) {
+      alert('Some alliances have locked their tiles. Admin access required to clear all.');
+      return;
+    }
     updateAssignments({});
+  };
+
+  // Toggle lock for an alliance
+  const toggleAllianceLock = (allianceId) => {
+    const newLocked = new Set(lockedAlliances);
+    if (newLocked.has(allianceId)) {
+      newLocked.delete(allianceId);
+    } else {
+      newLocked.add(allianceId);
+    }
+    setLockedAlliances(newLocked);
+  };
+
+  // Admin authentication
+  const checkAdminPassword = () => {
+    const savedPassword = localStorage.getItem(ADMIN_PASSWORD_KEY) || DEFAULT_ADMIN_PASSWORD;
+    if (adminPassword === savedPassword) {
+      setIsAdmin(true);
+      setShowAdminModal(false);
+      setAdminPassword('');
+      setSaveStatus('Admin mode activated');
+      setTimeout(() => setSaveStatus(''), 2000);
+    } else {
+      alert('Incorrect admin password');
+      setAdminPassword('');
+    }
+  };
+
+  const logoutAdmin = () => {
+    setIsAdmin(false);
+    setSaveStatus('Admin mode deactivated');
+    setTimeout(() => setSaveStatus(''), 2000);
   };
 
   const startNewMap = () => {
@@ -730,6 +797,18 @@ export default function Season2MapPlanner() {
 
   const applyOptimizerResults = () => {
     if (!optimizerResults) return;
+    
+    // Check if any target tiles are locked
+    const lockedTiles = optimizerResults.tiles.filter(t => {
+      const assignedAlliance = cellAssignments[t.key];
+      return assignedAlliance && lockedAlliances.has(assignedAlliance) && !isAdmin;
+    });
+    
+    if (lockedTiles.length > 0 && !isAdmin) {
+      alert(`${lockedTiles.length} tile(s) are locked. Admin access required to modify locked tiles.`);
+      return;
+    }
+    
     const newAssignments = { ...cellAssignments };
     optimizerResults.tiles.forEach(t => {
       newAssignments[t.key] = activeAlliance;
@@ -1173,6 +1252,27 @@ export default function Season2MapPlanner() {
               💾 Save/Load
             </button>
             
+            <div className="toolbar-divider" />
+            
+            {isAdmin ? (
+              <button 
+                className="btn btn-small"
+                onClick={logoutAdmin}
+                style={{ background: '#5a2a2a', borderColor: '#ff4444' }}
+                title="Admin Mode Active"
+              >
+                👑 Admin
+              </button>
+            ) : (
+              <button 
+                className="btn btn-small"
+                onClick={() => setShowAdminModal(true)}
+                title="Enter admin mode"
+              >
+                🔑 Admin
+              </button>
+            )}
+            
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
               {/* Connection Status */}
               {isConnecting ? (
@@ -1272,13 +1372,29 @@ export default function Season2MapPlanner() {
                 >
                   <div className="alliance-color" style={{ background: alliance.color }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {alliance.name}
+                      {lockedAlliances.has(alliance.id) && (
+                        <span style={{ fontSize: '10px' }} title="Locked">🔒</span>
+                      )}
                     </div>
                     <div style={{ fontSize: '10px', color: '#888' }}>
                       [{alliance.tag}] • {allStats[alliance.id]?.total || 0} tiles
                     </div>
                   </div>
+                  <button
+                    className="btn btn-small"
+                    onClick={(e) => { e.stopPropagation(); toggleAllianceLock(alliance.id); }}
+                    style={{ 
+                      padding: '4px 8px', 
+                      fontSize: '12px',
+                      background: lockedAlliances.has(alliance.id) ? '#5a3a3a' : '#3a3a4a',
+                      borderColor: lockedAlliances.has(alliance.id) ? '#ff6600' : 'rgba(255,255,255,0.3)'
+                    }}
+                    title={lockedAlliances.has(alliance.id) ? 'Unlock tiles' : 'Lock tiles'}
+                  >
+                    {lockedAlliances.has(alliance.id) ? '🔓' : '🔒'}
+                  </button>
                   <button
                     className="btn btn-small"
                     onClick={(e) => { e.stopPropagation(); setEditingAlliance(alliance.id); }}
@@ -1931,6 +2047,51 @@ export default function Season2MapPlanner() {
                   ✓ Apply to {alliances.find(a => a.id === activeAlliance)?.name}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Password Modal */}
+      {showAdminModal && (
+        <div className="modal-overlay" onClick={() => { setShowAdminModal(false); setAdminPassword(''); }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ minWidth: '300px' }}>
+            <h3 style={{ marginTop: 0, fontFamily: '"Orbitron", monospace' }}>🔑 Admin Access</h3>
+            <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+              Enter admin password to unlock all tiles and modify locked alliances.
+            </p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Admin Password</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={adminPassword}
+                  onChange={e => setAdminPassword(e.target.value)}
+                  onKeyPress={e => e.key === 'Enter' && checkAdminPassword()}
+                  placeholder="Enter password"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  autoFocus
+                />
+              </div>
+              
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <button 
+                  className="btn" 
+                  onClick={() => { setShowAdminModal(false); setAdminPassword(''); }}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  className="btn btn-success" 
+                  onClick={checkAdminPassword}
+                  style={{ flex: 1 }}
+                >
+                  Login
+                </button>
+              </div>
             </div>
           </div>
         </div>
