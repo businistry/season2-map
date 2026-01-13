@@ -175,6 +175,7 @@ export default function Season2MapPlanner() {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const lastResetTimestampRef = useRef(0);
+  const isResettingRef = useRef(false);
   
   // Firebase/Real-time collaboration state
   const [isConnected, setIsConnected] = useState(false);
@@ -454,6 +455,7 @@ export default function Season2MapPlanner() {
   // Auto-save to Firebase or localStorage whenever data changes
   useEffect(() => {
     if (!isLoaded) return; // Don't save until initial load is complete
+    if (isResettingRef.current) return; // Don't auto-save during a reset
     
     const saveData = async () => {
       try {
@@ -466,6 +468,11 @@ export default function Season2MapPlanner() {
           lockedAlliances: Array.from(lockedAlliances),
           savedAt: new Date().toISOString(),
         };
+
+        // Preserve reset timestamp if it exists
+        if (lastResetTimestampRef.current > 0) {
+          data.resetTimestamp = lastResetTimestampRef.current;
+        }
 
         if (useFirebase && db && isConnected) {
           // Save to Firebase
@@ -504,7 +511,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected]);
+  }, [alliances, cellAssignments, activeAlliance, planName, lockedAlliances, isLoaded, useFirebase, isConnected]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -696,6 +703,10 @@ export default function Season2MapPlanner() {
     const emptyAssignments = {};
     const emptyHistory = [{}];
     
+    // Set resetting flag to prevent auto-save from interfering
+    isResettingRef.current = true;
+    lastResetTimestampRef.current = resetTimestamp;
+    
     // Update local state immediately
     setCellAssignments(emptyAssignments);
     setHistory(emptyHistory);
@@ -708,7 +719,7 @@ export default function Season2MapPlanner() {
     if (useFirebase && db && isConnected) {
       try {
         const roomRef = doc(db, 'rooms', ROOM_ID);
-        lastUpdateRef.current = resetTimestamp; // Set update time to prevent overwrite
+        lastUpdateRef.current = resetTimestamp + 5000; // Set far in future to prevent overwrite
         await setDoc(roomRef, {
           version: STORAGE_VERSION,
           planName: 'Nova Imperium S2 Plan',
@@ -720,9 +731,15 @@ export default function Season2MapPlanner() {
           updatedAt: serverTimestamp(),
         }, { merge: false }); // Use merge: false to completely replace
         setSaveStatus('New map created - forcing reset for all users');
+        
+        // Keep resetting flag for 3 seconds to prevent auto-save interference
+        setTimeout(() => {
+          isResettingRef.current = false;
+        }, 3000);
       } catch (error) {
         console.error('Failed to reset map in Firebase:', error);
         setSaveStatus('New map created locally');
+        isResettingRef.current = false;
       }
     } else {
       // localStorage fallback
@@ -738,6 +755,7 @@ export default function Season2MapPlanner() {
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setSaveStatus('New map created locally');
+      isResettingRef.current = false;
     }
     
     setTimeout(() => setSaveStatus(''), 2000);
