@@ -174,6 +174,7 @@ export default function Season2MapPlanner() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+  const lastResetTimestampRef = useRef(0);
   
   // Firebase/Real-time collaboration state
   const [isConnected, setIsConnected] = useState(false);
@@ -224,6 +225,10 @@ export default function Season2MapPlanner() {
             // Load locked alliances
             if (data.lockedAlliances) {
               setLockedAlliances(new Set(data.lockedAlliances));
+            }
+            // Track reset timestamp
+            if (data.resetTimestamp) {
+              lastResetTimestampRef.current = data.resetTimestamp;
             }
           }
         }
@@ -287,6 +292,34 @@ export default function Season2MapPlanner() {
           // Prevent infinite loops - ignore updates we just sent
           if (now - lastUpdateRef.current < 1000) {
             return;
+          }
+          
+          // Check if there's been a reset - if so, ignore old data
+          if (data.resetTimestamp && data.resetTimestamp > lastResetTimestampRef.current) {
+            lastResetTimestampRef.current = data.resetTimestamp;
+            // Reset was initiated - apply it
+            if (data.version === STORAGE_VERSION) {
+              setAlliances(data.alliances || defaultAlliances);
+              setCellAssignments(data.cellAssignments || {});
+              setHistory([data.cellAssignments || {}]);
+              setHistoryIndex(0);
+              setActiveAlliance(data.activeAlliance || 'nova');
+              setPlanName(data.planName || 'Nova Imperium S2 Plan');
+              if (data.lockedAlliances) {
+                setLockedAlliances(new Set(data.lockedAlliances));
+              } else {
+                setLockedAlliances(new Set());
+              }
+              setLastSaved(data.updatedAt?.toDate() || null);
+              setSaveStatus('Map was reset');
+              setTimeout(() => setSaveStatus(''), 2000);
+            }
+            return;
+          }
+          
+          // If we've had a more recent reset, ignore older data
+          if (lastResetTimestampRef.current > 0 && (!data.resetTimestamp || data.resetTimestamp < lastResetTimestampRef.current)) {
+            return; // Ignore old data after a reset
           }
           
           // Update state only if data changed
@@ -663,15 +696,60 @@ export default function Season2MapPlanner() {
     setTimeout(() => setSaveStatus(''), 2000);
   };
 
-  const startNewMap = () => {
-    if (confirm('Start a new map? This will clear all territory assignments and reset history. Alliances will be preserved.')) {
-      setCellAssignments({});
-      setHistory([{}]);
-      setHistoryIndex(0);
-      setPlanName('Nova Imperium S2 Plan');
-      setSaveStatus('New map started');
-      setTimeout(() => setSaveStatus(''), 2000);
+  const startNewMap = async () => {
+    if (!confirm('Start a new map? This will clear all territory assignments and reset history. Alliances will be preserved.')) {
+      return;
     }
+    
+    const resetTimestamp = Date.now();
+    const emptyAssignments = {};
+    const emptyHistory = [{}];
+    
+    // Update local state immediately
+    setCellAssignments(emptyAssignments);
+    setHistory(emptyHistory);
+    setHistoryIndex(0);
+    setPlanName('Nova Imperium S2 Plan');
+    setLockedAlliances(new Set()); // Clear all locks
+    setSaveStatus('New map started');
+    
+    // Force update Firebase to override any other users' states
+    if (useFirebase && db && isConnected) {
+      try {
+        const roomRef = doc(db, 'rooms', ROOM_ID);
+        lastUpdateRef.current = resetTimestamp; // Set update time to prevent overwrite
+        await setDoc(roomRef, {
+          version: STORAGE_VERSION,
+          planName: 'Nova Imperium S2 Plan',
+          alliances: alliances, // Keep alliances
+          cellAssignments: emptyAssignments,
+          activeAlliance: activeAlliance,
+          lockedAlliances: [],
+          resetTimestamp: resetTimestamp, // Mark when reset happened
+          updatedAt: serverTimestamp(),
+        }, { merge: false }); // Use merge: false to completely replace
+        setSaveStatus('New map created - forcing reset for all users');
+      } catch (error) {
+        console.error('Failed to reset map in Firebase:', error);
+        setSaveStatus('New map created locally');
+      }
+    } else {
+      // localStorage fallback
+      const data = {
+        version: STORAGE_VERSION,
+        planName: 'Nova Imperium S2 Plan',
+        alliances: alliances,
+        cellAssignments: emptyAssignments,
+        activeAlliance: activeAlliance,
+        lockedAlliances: [],
+        resetTimestamp: resetTimestamp,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      setSaveStatus('New map created locally');
+    }
+    
+    setTimeout(() => setSaveStatus(''), 2000);
   };
 
   const addAlliance = () => {
@@ -1277,14 +1355,24 @@ export default function Season2MapPlanner() {
             <div className="toolbar-divider" />
             
             {isAdmin ? (
-              <button 
-                className="btn btn-small"
-                onClick={logoutAdmin}
-                style={{ background: '#5a2a2a', borderColor: '#ff4444' }}
-                title="Admin Mode Active"
-              >
-                👑 Admin
-              </button>
+              <>
+                <button 
+                  className="btn btn-small"
+                  onClick={logoutAdmin}
+                  style={{ background: '#5a2a2a', borderColor: '#ff4444' }}
+                  title="Admin Mode Active"
+                >
+                  👑 Admin
+                </button>
+                <button 
+                  className="btn btn-small btn-danger"
+                  onClick={startNewMap}
+                  title="Force Reset Map - Clears all tiles and user states"
+                  style={{ background: '#7a1a1a' }}
+                >
+                  🔄 Force Reset
+                </button>
+              </>
             ) : (
               <button 
                 className="btn btn-small"
