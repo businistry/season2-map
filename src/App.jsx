@@ -396,15 +396,29 @@ export default function Season2MapPlanner() {
         
         presenceUnsubscribeRef.current = onSnapshot(presenceQuery, (snapshot) => {
           const users = [];
-          snapshot.forEach((doc) => {
-            const data = doc.data();
+          const now = new Date();
+          const staleThreshold = 120000; // 2 minutes in milliseconds
+          
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
             // Exclude current user
             if (data.userId !== USER_ID) {
-              users.push({
-                id: data.userId,
-                name: data.userName || 'Anonymous',
-                lastSeen: data.lastSeen?.toDate() || new Date(),
-              });
+              const lastSeen = data.lastSeen?.toDate() || new Date();
+              const timeSinceSeen = now - lastSeen;
+              
+              // Only include users seen in the last 2 minutes
+              if (timeSinceSeen < staleThreshold) {
+                users.push({
+                  id: data.userId,
+                  name: data.userName || 'Anonymous',
+                  lastSeen: lastSeen,
+                });
+              } else {
+                // Mark stale users as offline
+                updateDoc(doc(db, PRESENCE_COLLECTION, data.userId), {
+                  online: false,
+                }).catch(() => {});
+              }
             }
           });
           setActiveUsers(users);
@@ -1406,16 +1420,57 @@ export default function Season2MapPlanner() {
               ) : null}
               
               {/* Active Users List */}
-              {isConnected && activeUsers.length > 0 && (
+              {isConnected && (
                 <div style={{ 
                   position: 'relative',
                   fontSize: '10px',
                   color: '#888',
+                  display: 'flex',
+                  gap: '6px',
+                  alignItems: 'center',
                 }}>
-                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                    <span>👥</span>
-                    <span>{activeUsers.map(u => u.name).join(', ')}</span>
-                  </div>
+                  {activeUsers.length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                      <span>👥</span>
+                      <span>{activeUsers.map(u => u.name).join(', ')}</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={refreshUsers}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#888',
+                      cursor: 'pointer',
+                      fontSize: '10px',
+                      padding: '2px 4px',
+                      borderRadius: '3px',
+                    }}
+                    title="Refresh user list"
+                    onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                  >
+                    🔄
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={clearAllUsers}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ff6666',
+                        cursor: 'pointer',
+                        fontSize: '10px',
+                        padding: '2px 4px',
+                        borderRadius: '3px',
+                      }}
+                      title="Clear all users (Admin only)"
+                      onMouseEnter={(e) => e.target.style.background = 'rgba(255,100,100,0.2)'}
+                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               )}
               
