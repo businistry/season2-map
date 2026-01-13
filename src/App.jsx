@@ -78,14 +78,18 @@ const defaultAlliances = [
   { id: 'enemy', name: 'Enemy', color: '#ff4444', tag: 'ENM' },
 ];
 
-const STORAGE_KEY = 'lastwar-s2-planner-data';
 const STORAGE_VERSION = 1;
 const ADMIN_PASSWORD_KEY = 'lastwar-s2-admin-password';
 const DEFAULT_ADMIN_PASSWORD = 'admin123'; // Change this to your desired password
+const SERVERS_STORAGE_KEY = 'lastwar-s2-servers'; // Store list of servers
+const CURRENT_SERVER_KEY = 'lastwar-s2-current-server'; // Store currently selected server
 
 // Firebase configuration
-const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances
 const PRESENCE_COLLECTION = 'presence'; // Track active users
+
+// Helper functions for server-based storage
+const getStorageKey = (serverId) => `lastwar-s2-planner-data-${serverId}`;
+const getRoomId = (serverId) => `season2-plan-${serverId}`;
 
 // Generate unique user ID for this session (safe access)
 const getUserId = () => {
@@ -163,6 +167,13 @@ export default function Season2MapPlanner() {
   const [optimizerMaxLevel, setOptimizerMaxLevel] = useState(6);
   const [optimizerResults, setOptimizerResults] = useState(null);
 
+  // Server selection state
+  const [servers, setServers] = useState([]);
+  const [currentServerId, setCurrentServerId] = useState(null);
+  const [showServerModal, setShowServerModal] = useState(false);
+  const [newServerName, setNewServerName] = useState('');
+  const [newServerId, setNewServerId] = useState('');
+  
   // Persistence state
   const [lastSaved, setLastSaved] = useState(null);
   const [saveStatus, setSaveStatus] = useState('');
@@ -212,7 +223,8 @@ export default function Season2MapPlanner() {
     if (!useFirebase || !dbAvailable) {
       // Fallback to localStorage
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const storageKey = getStorageKey(currentServerId);
+        const saved = localStorage.getItem(storageKey);
         if (saved) {
           const data = JSON.parse(saved);
           if (data.version === STORAGE_VERSION) {
@@ -369,7 +381,7 @@ export default function Season2MapPlanner() {
         await setDoc(presenceRef, {
           userId: USER_ID,
           userName: currentUserName,
-          roomId: ROOM_ID,
+          roomId: getRoomId(currentServerId),
           lastSeen: serverTimestamp(),
           online: true,
         });
@@ -391,7 +403,7 @@ export default function Season2MapPlanner() {
         // Listen for other users' presence
         const presenceQuery = query(
           collection(db, PRESENCE_COLLECTION),
-          where('roomId', '==', ROOM_ID),
+          where('roomId', '==', getRoomId(currentServerId)),
           where('online', '==', true)
         );
         
@@ -441,7 +453,7 @@ export default function Season2MapPlanner() {
         
         // Fallback to localStorage
         try {
-          const saved = localStorage.getItem(STORAGE_KEY);
+          const saved = localStorage.getItem(getStorageKey(currentServerId));
           if (saved) {
             const data = JSON.parse(saved);
             if (data.version === STORAGE_VERSION) {
@@ -474,7 +486,7 @@ export default function Season2MapPlanner() {
         presenceUnsubscribeRef.current();
       }
     };
-  }, [useFirebase]);
+  }, [useFirebase, currentServerId]);
 
   // Auto-save to Firebase or localStorage whenever data changes
   useEffect(() => {
@@ -501,7 +513,7 @@ export default function Season2MapPlanner() {
         if (useFirebase && db && isConnected) {
           // Save to Firebase
           try {
-            const roomRef = doc(db, 'rooms', ROOM_ID);
+            const roomRef = doc(db, 'rooms', getRoomId(currentServerId));
             lastUpdateRef.current = Date.now();
             await setDoc(roomRef, {
               ...data,
@@ -513,13 +525,13 @@ export default function Season2MapPlanner() {
           } catch (firebaseError) {
             console.error('Firebase save failed, falling back to localStorage:', firebaseError);
             // Fallback to localStorage
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
             setLastSaved(new Date());
             setSaveStatus('Saved locally (Firebase error)');
           }
         } else {
           // Save to localStorage
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
           setLastSaved(new Date());
           setSaveStatus('Auto-saved');
         }
@@ -608,7 +620,7 @@ export default function Season2MapPlanner() {
   // Clear all saved data
   const clearSavedData = () => {
     if (confirm('Are you sure you want to clear all saved data? This cannot be undone.')) {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(getStorageKey(currentServerId));
       setAlliances(defaultAlliances);
       setCellAssignments({});
       setActiveAlliance('nova');
