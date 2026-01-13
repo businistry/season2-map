@@ -291,13 +291,14 @@ export default function Season2MapPlanner() {
           const now = Date.now();
           
           // Prevent infinite loops - ignore updates we just sent
-          if (now - lastUpdateRef.current < 1000) {
+          if (now - lastUpdateRef.current < 2000) {
             return;
           }
           
           // Check if there's been a reset - if so, ignore old data
           if (data.resetTimestamp && data.resetTimestamp > lastResetTimestampRef.current) {
             lastResetTimestampRef.current = data.resetTimestamp;
+            isResettingRef.current = true; // Prevent auto-save during reset
             // Reset was initiated - apply it
             if (data.version === STORAGE_VERSION) {
               setAlliances(data.alliances || defaultAlliances);
@@ -313,14 +314,22 @@ export default function Season2MapPlanner() {
               }
               setLastSaved(data.updatedAt?.toDate() || null);
               setSaveStatus('Map was reset');
-              setTimeout(() => setSaveStatus(''), 2000);
+              setTimeout(() => {
+                setSaveStatus('');
+                isResettingRef.current = false;
+              }, 3000);
             }
             return;
           }
           
-          // If we've had a more recent reset, ignore older data
-          if (lastResetTimestampRef.current > 0 && (!data.resetTimestamp || data.resetTimestamp < lastResetTimestampRef.current)) {
-            return; // Ignore old data after a reset
+          // If we've had a more recent reset, ignore older data (check for 10 seconds after reset)
+          if (lastResetTimestampRef.current > 0) {
+            const timeSinceReset = now - lastResetTimestampRef.current;
+            if (timeSinceReset < 10000) { // 10 second window
+              if (!data.resetTimestamp || data.resetTimestamp < lastResetTimestampRef.current) {
+                return; // Ignore old data after a reset
+              }
+            }
           }
           
           // Update state only if data changed
