@@ -241,6 +241,8 @@ export default function Season2MapPlanner() {
   const [showServerModal, setShowServerModal] = useState(false);
   const [newServerName, setNewServerName] = useState('');
   const [newServerId, setNewServerId] = useState('');
+  const [showOnboarding, setShowOnboarding] = useState(() => !safeGet(CURRENT_SERVER_KEY));
+  const [onboardingServerInput, setOnboardingServerInput] = useState('');
   
   // Prompt for user name on first Firebase connection (defer to avoid blocking render)
   useEffect(() => {
@@ -260,6 +262,7 @@ export default function Season2MapPlanner() {
 
   // Initialize Firebase connection and load data
   useEffect(() => {
+    if (showOnboarding) return; // Wait until server selection is complete
     if (!currentServerId) return; // Don't run until server is initialized
     
     // Check if db is available (Firebase might not be initialized)
@@ -517,7 +520,7 @@ export default function Season2MapPlanner() {
         presenceUnsubscribeRef.current();
       }
     };
-  }, [useFirebase, currentServerId]);
+  }, [useFirebase, currentServerId, showOnboarding]);
 
   // Keep localStorage in sync if someone edits it externally
   useEffect(() => {
@@ -529,6 +532,7 @@ export default function Season2MapPlanner() {
   // Auto-save to Firebase or localStorage whenever data changes
   useEffect(() => {
     if (!isLoaded) return; // Don't save until initial load is complete
+    if (showOnboarding) return; // Don't save until server selection is complete
     
     const saveData = async () => {
       try {
@@ -579,7 +583,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances]);
+  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances, showOnboarding]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -700,6 +704,12 @@ export default function Season2MapPlanner() {
     // Check if tile is locked (and user is not admin)
     if (currentAssignment && lockedAlliances.has(currentAssignment) && !isAdmin) {
       alert(`This tile is locked by ${currentAlliance?.name || 'an alliance'}. Admin access required to modify.`);
+      return;
+    }
+
+    // Prevent modifying another alliance's tiles unless admin
+    if (currentAssignment && currentAssignment !== activeAlliance && !isAdmin) {
+      alert(`This tile belongs to ${currentAlliance?.name || 'another alliance'}. Switch to that alliance or use admin access.`);
       return;
     }
     
@@ -941,6 +951,31 @@ export default function Season2MapPlanner() {
     setCurrentServerId(serverId);
     safeSet(CURRENT_SERVER_KEY, serverId);
     setShowServerModal(false);
+    setShowOnboarding(false);
+  };
+
+  const joinServerFromOnboarding = () => {
+    const raw = onboardingServerInput.trim();
+    const id = sanitizeServerId(raw);
+
+    if (!id) {
+      alert('Please enter a valid server number or ID.');
+      return;
+    }
+
+    const existing = servers.find(s => s.id === id);
+    if (existing) {
+      switchServer(id);
+      setOnboardingServerInput('');
+      return;
+    }
+
+    const name = raw ? `Server ${raw}` : `Server ${id}`;
+    const nextServers = [...servers, { id, name }];
+    setServers(nextServers);
+    persistServers(nextServers, id);
+    setOnboardingServerInput('');
+    switchServer(id);
   };
 
   const addServer = () => {
@@ -1527,6 +1562,68 @@ export default function Season2MapPlanner() {
             SEASON 2 TERRITORY PLANNER
           </p>
         </header>
+      )}
+
+      {/* Onboarding: Server Selection */}
+      {showOnboarding && (
+        <div className="modal-overlay" onClick={() => {}}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ minWidth: '420px' }}>
+            <h3 style={{ marginTop: 0, fontFamily: '"Orbitron", monospace' }}>🌐 Join Your Server</h3>
+            <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+              Enter your server number. Collaboration and alliances are isolated per server.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                  Server Number
+                </label>
+                <input
+                  className="input"
+                  value={onboardingServerInput}
+                  onChange={e => setOnboardingServerInput(e.target.value)}
+                  placeholder="e.g. 1642"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  autoFocus
+                  onKeyPress={e => e.key === 'Enter' && joinServerFromOnboarding()}
+                />
+              </div>
+              <button
+                className="btn btn-success"
+                onClick={joinServerFromOnboarding}
+                style={{ width: '100%' }}
+              >
+                Join Server
+              </button>
+            </div>
+
+            {servers.length > 0 && (
+              <div>
+                <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px', fontWeight: 600 }}>
+                  Existing Servers
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
+                  {servers.map(server => (
+                    <button
+                      key={server.id}
+                      className="btn btn-small"
+                      onClick={() => switchServer(server.id)}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        background: currentServerId === server.id ? '#2a5a2a' : '#3a3a4a',
+                      }}
+                    >
+                      <span>{server.name}</span>
+                      <span style={{ fontSize: '10px', color: '#bbb' }}>{server.id}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Server Selection Modal */}
