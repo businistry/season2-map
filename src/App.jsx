@@ -445,6 +445,23 @@ export default function Season2MapPlanner() {
     }
   };
 
+  const getAuthErrorMessage = (error) => {
+    switch (error?.code) {
+      case 'auth/configuration-not-found':
+        return 'Discord login is not configured. Enable the Discord OIDC provider and authorized domains in Firebase Auth.';
+      case 'auth/unauthorized-domain':
+        return 'This domain is not authorized for Discord login. Add it to Firebase Auth authorized domains.';
+      case 'auth/popup-blocked':
+        return 'Popup blocked - redirecting to Discord...';
+      case 'auth/popup-closed-by-user':
+        return 'Popup closed before completing login.';
+      case 'auth/cancelled-popup-request':
+        return 'Login popup was cancelled. Please try again.';
+      default:
+        return 'Discord login failed.';
+    }
+  };
+
   const loginWithDiscord = async () => {
     if (!auth) {
       setSaveStatus('Auth not available');
