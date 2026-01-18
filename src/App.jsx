@@ -184,6 +184,7 @@ export default function Season2MapPlanner() {
   const [accessPasscode, setAccessPasscode] = useState('');
   const [accessError, setAccessError] = useState('');
   const [accessLoading, setAccessLoading] = useState(false);
+  const [allianceAccessPrompted, setAllianceAccessPrompted] = useState(false);
   const [passcodeDraft, setPasscodeDraft] = useState('');
   const [passcodeConfirm, setPasscodeConfirm] = useState('');
   const [passcodeMessage, setPasscodeMessage] = useState('');
@@ -240,7 +241,7 @@ export default function Season2MapPlanner() {
   const [showServerModal, setShowServerModal] = useState(false);
   const [newServerName, setNewServerName] = useState('');
   const [newServerId, setNewServerId] = useState('');
-  const [showOnboarding, setShowOnboarding] = useState(() => !safeGet(CURRENT_SERVER_KEY));
+  const [showOnboarding, setShowOnboarding] = useState(true);
   const [onboardingServerInput, setOnboardingServerInput] = useState('');
   
   // Prompt for user name on first Firebase connection (defer to avoid blocking render)
@@ -274,6 +275,17 @@ export default function Season2MapPlanner() {
   useEffect(() => {
     setAuthorizedAllianceIds([]);
   }, [currentServerId]);
+
+  useEffect(() => {
+    if (showOnboarding) return;
+    if (!isLoaded) return;
+    if (isAdmin) return;
+    if (showAllianceAccess) return;
+    if (allianceAccessPrompted) return;
+    if (authorizedAllianceIds.length > 0) return;
+    setAllianceAccessPrompted(true);
+    setShowAllianceAccess(true);
+  }, [showOnboarding, isLoaded, isAdmin, showAllianceAccess, allianceAccessPrompted, authorizedAllianceIds.length]);
 
   const mapRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -1008,6 +1020,7 @@ export default function Season2MapPlanner() {
     safeSet(CURRENT_SERVER_KEY, serverId);
     setShowServerModal(false);
     setShowOnboarding(false);
+    setAllianceAccessPrompted(false);
   };
 
   const joinServerFromOnboarding = () => {
