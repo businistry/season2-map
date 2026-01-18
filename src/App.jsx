@@ -2385,7 +2385,9 @@ export default function Season2MapPlanner() {
           <div className="map-grid-axis">
             <div className="axis-cell" />
             {mapData[0].map((_, colIdx) => (
-              <div key={`col-${colIdx}`} className="axis-cell">{colIdx + 1}</div>
+              <div key={`col-${colIdx}`} className="axis-cell">
+                {String.fromCharCode(65 + colIdx)}
+              </div>
             ))}
             {mapData.map((row, rowIdx) => (
               <React.Fragment key={`row-${rowIdx}`}>
@@ -2757,7 +2759,7 @@ export default function Season2MapPlanner() {
             </>
           )}
           <div style={{ fontSize: '0.65rem', color: '#555', marginTop: '6px' }}>
-            Position: ({hoveredCell.row}, {hoveredCell.col})
+            Position: {String.fromCharCode(65 + hoveredCell.col)}{hoveredCell.row + 1}
           </div>
         </div>
       )}
