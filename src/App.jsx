@@ -208,8 +208,6 @@ export default function Season2MapPlanner() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
-
-  const isPrivileged = isAdmin || isServerAdmin;
   
   // History for undo/redo
   const [history, setHistory] = useState([{}]);
@@ -240,6 +238,8 @@ export default function Season2MapPlanner() {
   const [serverAdminMessage, setServerAdminMessage] = useState('');
   const [serverAdminAuth, setServerAdminAuth] = useState(null);
   const lastResetTimestampRef = useRef(0);
+
+  const isPrivileged = isAdmin || isServerAdmin;
   
   // Firebase/Real-time collaboration state
   const [isConnected, setIsConnected] = useState(false);
