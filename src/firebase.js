@@ -3,6 +3,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 // Your Firebase configuration object
 const firebaseConfig = {
@@ -18,10 +19,12 @@ const firebaseConfig = {
 // Initialize Firebase
 let app = null;
 let db = null;
+let auth = null;
 
 try {
   app = initializeApp(firebaseConfig);
   db = getFirestore(app);
+  auth = getAuth(app);
   
   // Enable offline persistence (optional but recommended)
   enableIndexedDbPersistence(db).catch((err) => {
@@ -35,7 +38,8 @@ try {
   console.warn('Firebase initialization failed. Using localStorage fallback:', error);
   app = null;
   db = null;
+  auth = null;
 }
 
-export { db };
+export { db, auth };
 export default app;
