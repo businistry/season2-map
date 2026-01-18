@@ -18,7 +18,9 @@ import { db, auth } from './firebase';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
+  signInWithRedirect,
   signOut,
+  getRedirectResult,
   OAuthProvider,
 } from 'firebase/auth';
 
@@ -325,6 +327,26 @@ export default function Season2MapPlanner() {
   }, []);
 
   useEffect(() => {
+    if (!auth) return;
+    let isMounted = true;
+    getRedirectResult(auth)
+      .then((result) => {
+        if (!isMounted || !result?.user) return;
+        setSaveStatus('Discord login successful');
+        setTimeout(() => setSaveStatus(''), 2000);
+      })
+      .catch((error) => {
+        if (!isMounted) return;
+        console.error('Discord redirect login failed:', error);
+        setSaveStatus(getAuthErrorMessage(error));
+        setTimeout(() => setSaveStatus(''), 3000);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!authUser || !currentServerId || showOnboarding) return;
     let isMounted = true;
     const loadProfile = async () => {
@@ -423,6 +445,23 @@ export default function Season2MapPlanner() {
     }
   };
 
+  const getAuthErrorMessage = (error) => {
+    switch (error?.code) {
+      case 'auth/configuration-not-found':
+        return 'Discord login is not configured. Enable the Discord OIDC provider and authorized domains in Firebase Auth.';
+      case 'auth/unauthorized-domain':
+        return 'This domain is not authorized for Discord login. Add it to Firebase Auth authorized domains.';
+      case 'auth/popup-blocked':
+        return 'Popup blocked - redirecting to Discord...';
+      case 'auth/popup-closed-by-user':
+        return 'Popup closed before completing login.';
+      case 'auth/cancelled-popup-request':
+        return 'Login popup was cancelled. Please try again.';
+      default:
+        return 'Discord login failed.';
+    }
+  };
+
   const loginWithDiscord = async () => {
     if (!auth) {
       setSaveStatus('Auth not available');
@@ -431,13 +470,33 @@ export default function Season2MapPlanner() {
     }
     try {
       const provider = new OAuthProvider(DISCORD_PROVIDER_ID);
+      provider.addScope('identify');
+      provider.addScope('email');
       await signInWithPopup(auth, provider);
       setSaveStatus('Discord login successful');
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) {
       console.error('Discord login failed:', error);
-      setSaveStatus('Discord login failed');
-      setTimeout(() => setSaveStatus(''), 2000);
+      const statusMessage = getAuthErrorMessage(error);
+      const popupErrors = new Set([
+        'auth/popup-blocked',
+        'auth/popup-closed-by-user',
+        'auth/cancelled-popup-request',
+      ]);
+      if (popupErrors.has(error?.code)) {
+        try {
+          const provider = new OAuthProvider(DISCORD_PROVIDER_ID);
+          provider.addScope('identify');
+          provider.addScope('email');
+          setSaveStatus(statusMessage);
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirectError) {
+          console.error('Discord redirect login failed:', redirectError);
+        }
+      }
+      setSaveStatus(statusMessage);
+      setTimeout(() => setSaveStatus(''), 3000);
     }
   };
 
