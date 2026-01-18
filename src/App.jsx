@@ -188,6 +188,7 @@ export default function Season2MapPlanner() {
   const [passcodeDraft, setPasscodeDraft] = useState('');
   const [passcodeConfirm, setPasscodeConfirm] = useState('');
   const [passcodeMessage, setPasscodeMessage] = useState('');
+  const [isViewOnly, setIsViewOnly] = useState(false);
   
   // History for undo/redo
   const [history, setHistory] = useState([{}]);
@@ -211,6 +212,12 @@ export default function Season2MapPlanner() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+  const [isServerAdmin, setIsServerAdmin] = useState(false);
+  const [showServerAdminModal, setShowServerAdminModal] = useState(false);
+  const [serverAdminPassword, setServerAdminPassword] = useState('');
+  const [serverAdminConfirm, setServerAdminConfirm] = useState('');
+  const [serverAdminMessage, setServerAdminMessage] = useState('');
+  const [serverAdminAuth, setServerAdminAuth] = useState(null);
   const lastResetTimestampRef = useRef(0);
   
   // Firebase/Real-time collaboration state
@@ -264,6 +271,14 @@ export default function Season2MapPlanner() {
   }, [editingAlliance]);
 
   useEffect(() => {
+    if (!showServerAdminModal) {
+      setServerAdminPassword('');
+      setServerAdminConfirm('');
+      setServerAdminMessage('');
+    }
+  }, [showServerAdminModal]);
+
+  useEffect(() => {
     if (!showAllianceAccess) {
       setAccessAllianceName('');
       setAccessPasscode('');
@@ -279,20 +294,29 @@ export default function Season2MapPlanner() {
   useEffect(() => {
     if (showOnboarding) return;
     if (!isLoaded) return;
-    if (isAdmin) return;
+    if (isAdmin || isServerAdmin) return;
     if (showAllianceAccess) return;
     if (allianceAccessPrompted) return;
     if (authorizedAllianceIds.length > 0) return;
+    if (isViewOnly) return;
     setAllianceAccessPrompted(true);
     setShowAllianceAccess(true);
-  }, [showOnboarding, isLoaded, isAdmin, showAllianceAccess, allianceAccessPrompted, authorizedAllianceIds.length]);
+  }, [showOnboarding, isLoaded, isAdmin, isServerAdmin, showAllianceAccess, allianceAccessPrompted, authorizedAllianceIds.length, isViewOnly]);
+
+  useEffect(() => {
+    if (!isAdmin && !isServerAdmin && authorizedAllianceIds.length === 0) {
+      setIsViewOnly(true);
+    }
+  }, [authorizedAllianceIds.length, isAdmin, isServerAdmin]);
 
   const mapRef = useRef(null);
   const fileInputRef = useRef(null);
 
+  const isPrivileged = isAdmin || isServerAdmin;
+
   const isAuthorizedForAlliance = useCallback((allianceId) => {
-    return isAdmin || authorizedAllianceIds.includes(allianceId);
-  }, [isAdmin, authorizedAllianceIds]);
+    return isPrivileged || authorizedAllianceIds.includes(allianceId);
+  }, [isPrivileged, authorizedAllianceIds]);
 
   const hashPasscode = async (passcode) => {
     if (!window.crypto?.subtle) {
@@ -330,6 +354,7 @@ export default function Season2MapPlanner() {
             setLastSaved(data.savedAt ? new Date(data.savedAt) : null);
             setSaveStatus('Loaded from localStorage');
             setAllianceAuth(data.allianceAuth || {});
+            setServerAdminAuth(data.serverAdminAuth || null);
             // Load locked alliances
             if (data.lockedAlliances) {
               setLockedAlliances(new Set(data.lockedAlliances));
@@ -379,6 +404,7 @@ export default function Season2MapPlanner() {
             setSaveStatus('Connected - Real-time collaboration active');
             setIsConnected(true);
             setAllianceAuth(data.allianceAuth || {});
+            setServerAdminAuth(data.serverAdminAuth || null);
           }
         } else {
           // Create initial room document
@@ -390,6 +416,7 @@ export default function Season2MapPlanner() {
             activeAlliance: 'nova',
             lockedAlliances: [],
             allianceAuth: {},
+            serverAdminAuth: null,
             updatedAt: serverTimestamp(),
           });
           setSaveStatus('Connected - Room created');
@@ -426,6 +453,7 @@ export default function Season2MapPlanner() {
                 setLockedAlliances(new Set());
               }
             setAllianceAuth(data.allianceAuth || {});
+            setServerAdminAuth(data.serverAdminAuth || null);
               setLastSaved(data.updatedAt?.toDate() || null);
               setSaveStatus('Map was reset');
               setTimeout(() => {
@@ -456,6 +484,7 @@ export default function Season2MapPlanner() {
               setLockedAlliances(new Set(data.lockedAlliances));
             }
             setAllianceAuth(data.allianceAuth || {});
+            setServerAdminAuth(data.serverAdminAuth || null);
             
             // Only update if different (to avoid unnecessary re-renders)
             if (JSON.stringify(newAssignments) !== JSON.stringify(cellAssignments)) {
@@ -597,6 +626,7 @@ export default function Season2MapPlanner() {
           cellAssignments,
           activeAlliance,
           allianceAuth,
+          serverAdminAuth,
           lockedAlliances: Array.from(lockedAlliances),
           savedAt: new Date().toISOString(),
         };
@@ -638,7 +668,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, allianceAuth, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances, showOnboarding]);
+  }, [alliances, cellAssignments, activeAlliance, planName, allianceAuth, serverAdminAuth, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances, showOnboarding]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -722,6 +752,8 @@ export default function Season2MapPlanner() {
       setLastSaved(null);
       setAllianceAuth({});
       setAuthorizedAllianceIds([]);
+      setServerAdminAuth(null);
+      setIsServerAdmin(false);
       setSaveStatus('Data cleared');
       setTimeout(() => setSaveStatus(''), 2000);
     }
@@ -760,18 +792,23 @@ export default function Season2MapPlanner() {
     const currentAlliance = alliances.find(a => a.id === currentAssignment);
     const activeAllianceName = alliances.find(a => a.id === activeAlliance)?.name;
 
+    if (isViewOnly && !isPrivileged) {
+      alert('View-only mode is enabled. Disable it to edit.');
+      return;
+    }
+
     if (!requireAllianceAccess(activeAlliance, activeAllianceName)) {
       return;
     }
     
     // Check if tile is locked (and user is not admin)
-    if (currentAssignment && lockedAlliances.has(currentAssignment) && !isAdmin) {
+    if (currentAssignment && lockedAlliances.has(currentAssignment) && !isPrivileged) {
       alert(`This tile is locked by ${currentAlliance?.name || 'an alliance'}. Admin access required to modify.`);
       return;
     }
 
     // Prevent modifying another alliance's tiles unless admin
-    if (currentAssignment && currentAssignment !== activeAlliance && !isAdmin) {
+    if (currentAssignment && currentAssignment !== activeAlliance && !isPrivileged) {
       alert(`This tile belongs to ${currentAlliance?.name || 'another alliance'}. Switch to that alliance or use admin access.`);
       return;
     }
@@ -789,9 +826,13 @@ export default function Season2MapPlanner() {
 
   const clearAlliance = (allianceId) => {
     const alliance = alliances.find(a => a.id === allianceId);
+    if (isViewOnly && !isPrivileged) {
+      alert('View-only mode is enabled. Disable it to edit.');
+      return;
+    }
     if (!requireAllianceAccess(allianceId, alliance?.name)) return;
     // Check if alliance tiles are locked (and user is not admin)
-    if (lockedAlliances.has(allianceId) && !isAdmin) {
+    if (lockedAlliances.has(allianceId) && !isPrivileged) {
       alert(`Tiles for ${alliance?.name || 'this alliance'} are locked. Admin access required to clear.`);
       return;
     }
@@ -806,7 +847,11 @@ export default function Season2MapPlanner() {
   };
 
   const clearAll = () => {
-    if (!isAdmin) {
+    if (isViewOnly && !isPrivileged) {
+      alert('View-only mode is enabled. Disable it to edit.');
+      return;
+    }
+    if (!isPrivileged) {
       alert('Admin access required to clear all territories.');
       return;
     }
@@ -816,6 +861,10 @@ export default function Season2MapPlanner() {
   // Toggle lock for an alliance
   const toggleAllianceLock = (allianceId) => {
     const alliance = alliances.find(a => a.id === allianceId);
+    if (isViewOnly && !isPrivileged) {
+      alert('View-only mode is enabled. Disable it to edit.');
+      return;
+    }
     if (!requireAllianceAccess(allianceId, alliance?.name)) return;
     const newLocked = new Set(lockedAlliances);
     if (newLocked.has(allianceId)) {
@@ -844,6 +893,47 @@ export default function Season2MapPlanner() {
   const logoutAdmin = () => {
     setIsAdmin(false);
     setSaveStatus('Admin mode deactivated');
+    setTimeout(() => setSaveStatus(''), 2000);
+  };
+
+  const checkServerAdminPassword = async () => {
+    if (!serverAdminPassword.trim()) {
+      setServerAdminMessage('Enter a passcode.');
+      return;
+    }
+    try {
+      const hashed = await hashPasscode(serverAdminPassword);
+      if (serverAdminAuth?.passcodeHash) {
+        if (hashed !== serverAdminAuth.passcodeHash) {
+          setServerAdminMessage('Incorrect server admin passcode.');
+          return;
+        }
+      } else {
+        if (serverAdminPassword.trim() !== serverAdminConfirm.trim()) {
+          setServerAdminMessage('Passcodes do not match.');
+          return;
+        }
+        setServerAdminAuth({
+          passcodeHash: hashed,
+          updatedAt: Date.now(),
+        });
+      }
+      setIsServerAdmin(true);
+      setShowServerAdminModal(false);
+      setServerAdminPassword('');
+      setServerAdminConfirm('');
+      setServerAdminMessage('');
+      setSaveStatus('Server admin activated');
+      setTimeout(() => setSaveStatus(''), 2000);
+    } catch (error) {
+      console.error('Server admin check failed:', error);
+      setServerAdminMessage('Unable to verify passcode.');
+    }
+  };
+
+  const logoutServerAdmin = () => {
+    setIsServerAdmin(false);
+    setSaveStatus('Server admin deactivated');
     setTimeout(() => setSaveStatus(''), 2000);
   };
 
@@ -895,7 +985,7 @@ export default function Season2MapPlanner() {
 
   // Admin function to clear all user presence (force cleanup)
   const clearAllUsers = async () => {
-    if (!isAdmin) {
+    if (!isPrivileged) {
       alert('Admin access required');
       return;
     }
@@ -968,6 +1058,7 @@ export default function Season2MapPlanner() {
           planName: 'Nova Imperium S2 Plan',
           alliances: alliances, // Keep alliances
           allianceAuth: allianceAuth,
+          serverAdminAuth: serverAdminAuth,
           cellAssignments: emptyAssignments,
           activeAlliance: activeAlliance,
           lockedAlliances: [],
@@ -986,6 +1077,7 @@ export default function Season2MapPlanner() {
         planName: 'Nova Imperium S2 Plan',
         alliances: alliances,
         allianceAuth: allianceAuth,
+        serverAdminAuth: serverAdminAuth,
         cellAssignments: emptyAssignments,
         activeAlliance: activeAlliance,
         lockedAlliances: [],
@@ -996,6 +1088,84 @@ export default function Season2MapPlanner() {
       setSaveStatus('New map created locally');
     }
     
+    setTimeout(() => setSaveStatus(''), 2000);
+  };
+
+  const fullResetMap = async () => {
+    if (!isPrivileged) {
+      alert('Admin access required to force reset.');
+      return;
+    }
+    if (!confirm('Force reset everything? This will clear alliances, users, passwords, and all assignments.')) {
+      return;
+    }
+
+    const resetTimestamp = Date.now();
+    const emptyAssignments = {};
+    const emptyHistory = [{}];
+
+    setAlliances(defaultAlliances);
+    setAllianceAuth({});
+    setServerAdminAuth(null);
+    setAuthorizedAllianceIds([]);
+    setActiveAlliance('nova');
+    setCellAssignments(emptyAssignments);
+    setHistory(emptyHistory);
+    setHistoryIndex(0);
+    setPlanName('Nova Imperium S2 Plan');
+    setLockedAlliances(new Set());
+    setIsViewOnly(true);
+    setSaveStatus('Full reset complete');
+
+    if (useFirebase && db && isConnected) {
+      try {
+        const roomRef = doc(db, 'rooms', getRoomId(currentServerId));
+        lastUpdateRef.current = resetTimestamp + 5000;
+        await setDoc(roomRef, {
+          version: STORAGE_VERSION,
+          planName: 'Nova Imperium S2 Plan',
+          alliances: defaultAlliances,
+          allianceAuth: {},
+          serverAdminAuth: null,
+          cellAssignments: emptyAssignments,
+          activeAlliance: 'nova',
+          lockedAlliances: [],
+          resetTimestamp: resetTimestamp,
+          updatedAt: serverTimestamp(),
+        }, { merge: false });
+
+        const presenceQuery = query(
+          collection(db, PRESENCE_COLLECTION),
+          where('roomId', '==', getRoomId(currentServerId))
+        );
+        const snapshot = await getDocs(presenceQuery);
+        snapshot.forEach(async (docSnap) => {
+          try {
+            await deleteDoc(doc(db, PRESENCE_COLLECTION, docSnap.id));
+          } catch (e) {
+            console.error('Failed to delete user:', e);
+          }
+        });
+      } catch (error) {
+        console.error('Full reset failed:', error);
+        setSaveStatus('Reset completed locally');
+      }
+    } else {
+      const data = {
+        version: STORAGE_VERSION,
+        planName: 'Nova Imperium S2 Plan',
+        alliances: defaultAlliances,
+        allianceAuth: {},
+        serverAdminAuth: null,
+        cellAssignments: emptyAssignments,
+        activeAlliance: 'nova',
+        lockedAlliances: [],
+        resetTimestamp: resetTimestamp,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(getStorageKey(currentServerId), JSON.stringify(data));
+    }
+
     setTimeout(() => setSaveStatus(''), 2000);
   };
 
@@ -1014,6 +1184,7 @@ export default function Season2MapPlanner() {
     setIsConnecting(true);
     setIsConnected(false);
     setActiveUsers([]);
+    setIsServerAdmin(false);
     setSaveStatus(`Switching to ${serverId}...`);
 
     setCurrentServerId(serverId);
@@ -1100,7 +1271,7 @@ export default function Season2MapPlanner() {
   };
 
   const addAlliance = () => {
-    if (!isAdmin) {
+    if (!isPrivileged) {
       alert('Only admins can add alliances here. Use Alliance Access to create your alliance.');
       return;
     }
@@ -1121,6 +1292,7 @@ export default function Season2MapPlanner() {
 
   const openAllianceAccess = (name = '') => {
     setAccessAllianceName(name);
+    setIsViewOnly(false);
     setShowAllianceAccess(true);
   };
 
@@ -1185,6 +1357,7 @@ export default function Season2MapPlanner() {
         setAuthorizedAllianceIds([...authorizedAllianceIds, alliance.id]);
       }
 
+      setIsViewOnly(false);
       setActiveAlliance(alliance.id);
       setShowAllianceAccess(false);
     } catch (error) {
@@ -1233,6 +1406,10 @@ export default function Season2MapPlanner() {
   };
 
   const updateAlliance = (id, updates) => {
+    if (isViewOnly && !isPrivileged) {
+      alert('View-only mode is enabled. Disable it to edit.');
+      return;
+    }
     if (!requireAllianceAccess(id, alliances.find(a => a.id === id)?.name)) return;
     if (updates.name) {
       const nameKey = normalizeAllianceKey(updates.name);
@@ -1262,7 +1439,11 @@ export default function Season2MapPlanner() {
   };
 
   const deleteAlliance = (id) => {
-    if (!isAdmin) {
+    if (isViewOnly && !isPrivileged) {
+      alert('View-only mode is enabled. Disable it to edit.');
+      return;
+    }
+    if (!isPrivileged) {
       alert('Only admins can delete alliances.');
       return;
     }
@@ -1763,6 +1944,18 @@ export default function Season2MapPlanner() {
                 </div>
               </div>
             )}
+            <div style={{ marginTop: '16px' }}>
+              <button
+                className="btn"
+                onClick={() => { setIsViewOnly(true); setShowOnboarding(false); }}
+                style={{ width: '100%' }}
+              >
+                Continue in View-Only Mode
+              </button>
+              <div style={{ fontSize: '10px', color: '#666', marginTop: '6px' }}>
+                You can observe updates in real time without editing.
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1899,6 +2092,16 @@ export default function Season2MapPlanner() {
               {accessibilityMode ? '🎨 Color' : '⚫ Grayscale'}
             </button>
             
+            {(isAdmin || isServerAdmin || authorizedAllianceIds.length > 0) && (
+              <button 
+                className={`btn btn-small ${isViewOnly ? 'active' : ''}`}
+                onClick={() => setIsViewOnly(!isViewOnly)}
+                title="Toggle View-Only Mode"
+              >
+                {isViewOnly ? '👀 View Only' : '✏️ Edit Mode'}
+              </button>
+            )}
+            
             <button 
               className="btn btn-small"
               onClick={() => setScreenshotMode(true)}
@@ -1937,21 +2140,49 @@ export default function Season2MapPlanner() {
                 </button>
                 <button 
                   className="btn btn-small btn-danger"
-                  onClick={startNewMap}
-                  title="Force Reset Map - Clears all tiles and user states"
+                  onClick={fullResetMap}
+                  title="Force Reset - Clears alliances, users, passwords, and tiles"
+                  style={{ background: '#7a1a1a' }}
+                >
+                  🔄 Force Reset
+                </button>
+              </>
+            ) : isServerAdmin ? (
+              <>
+                <button 
+                  className="btn btn-small"
+                  onClick={logoutServerAdmin}
+                  style={{ background: '#2a5a3a', borderColor: '#44ff88' }}
+                  title="Server Admin Active"
+                >
+                  🛡️ Server Admin
+                </button>
+                <button 
+                  className="btn btn-small btn-danger"
+                  onClick={fullResetMap}
+                  title="Force Reset - Clears alliances, users, passwords, and tiles"
                   style={{ background: '#7a1a1a' }}
                 >
                   🔄 Force Reset
                 </button>
               </>
             ) : (
-              <button 
-                className="btn btn-small"
-                onClick={() => setShowAdminModal(true)}
-                title="Enter admin mode"
-              >
-                🔑 Admin
-              </button>
+              <>
+                <button 
+                  className="btn btn-small"
+                  onClick={() => setShowAdminModal(true)}
+                  title="Enter admin mode"
+                >
+                  🔑 Admin
+                </button>
+                <button 
+                  className="btn btn-small"
+                  onClick={() => setShowServerAdminModal(true)}
+                  title="Enter server admin mode"
+                >
+                  🛡️ Server Admin
+                </button>
+              </>
             )}
             
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: 'auto' }}>
@@ -2039,7 +2270,7 @@ export default function Season2MapPlanner() {
               <button 
                 className="btn btn-small"
                 onClick={() => {
-                  if (!isAdmin) {
+                  if (!isPrivileged) {
                     alert('Only admins can add alliances here. Use Alliance Access to create your alliance.');
                     return;
                   }
@@ -2065,7 +2296,7 @@ export default function Season2MapPlanner() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {alliance.name}
-                      {!isAuthorizedForAlliance(alliance.id) && !isAdmin && (
+                      {!isAuthorizedForAlliance(alliance.id) && !isPrivileged && (
                         <span style={{ fontSize: '10px' }} title="Passcode required">🔐</span>
                       )}
                       {lockedAlliances.has(alliance.id) && (
@@ -2556,6 +2787,13 @@ export default function Season2MapPlanner() {
                 <button className="btn" onClick={() => setShowAllianceAccess(false)} style={{ flex: 1 }}>
                   Cancel
                 </button>
+                <button
+                  className="btn btn-small"
+                  onClick={() => { setIsViewOnly(true); setShowAllianceAccess(false); }}
+                  style={{ flex: 1 }}
+                >
+                  View Only
+                </button>
                 <button className="btn btn-success" onClick={handleAllianceAccess} style={{ flex: 1 }} disabled={accessLoading}>
                   {accessLoading ? 'Checking...' : 'Continue'}
                 </button>
@@ -2753,6 +2991,72 @@ export default function Season2MapPlanner() {
                   style={{ flex: 1 }}
                 >
                   Login
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Server Admin Password Modal */}
+      {showServerAdminModal && (
+        <div className="modal-overlay" onClick={() => { setShowServerAdminModal(false); }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ minWidth: '320px' }}>
+            <h3 style={{ marginTop: 0, fontFamily: '"Orbitron", monospace' }}>🛡️ Server Admin Access</h3>
+            <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+              {serverAdminAuth?.passcodeHash
+                ? 'Enter the server admin passcode.'
+                : 'Set a new server admin passcode for this server.'}
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                  Server Admin Passcode
+                </label>
+                <input
+                  className="input"
+                  type="password"
+                  value={serverAdminPassword}
+                  onChange={e => setServerAdminPassword(e.target.value)}
+                  placeholder="Enter passcode"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  autoFocus
+                  onKeyPress={e => e.key === 'Enter' && checkServerAdminPassword()}
+                />
+              </div>
+              {!serverAdminAuth?.passcodeHash && (
+                <div>
+                  <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                    Confirm Passcode
+                  </label>
+                  <input
+                    className="input"
+                    type="password"
+                    value={serverAdminConfirm}
+                    onChange={e => setServerAdminConfirm(e.target.value)}
+                    placeholder="Confirm passcode"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
+              {serverAdminMessage && (
+                <div style={{ fontSize: '11px', color: '#ff8800' }}>{serverAdminMessage}</div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <button
+                  className="btn"
+                  onClick={() => { setShowServerAdminModal(false); }}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-success"
+                  onClick={checkServerAdminPassword}
+                  style={{ flex: 1 }}
+                >
+                  {serverAdminAuth?.passcodeHash ? 'Login' : 'Set Passcode'}
                 </button>
               </div>
             </div>
