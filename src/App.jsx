@@ -1555,12 +1555,20 @@ export default function Season2MapPlanner() {
       padding: screenshotMode ? '40px' : '20px',
     }}>
       <style>{`
-        .map-grid { 
+        .map-grid-axis { 
           display: grid;
-          grid-template-columns: repeat(13, 1fr);
+          grid-template-columns: 26px repeat(13, 1fr);
           gap: 4px;
           max-width: 1000px;
           margin: 0 auto;
+          align-items: center;
+        }
+
+        .axis-cell {
+          font-size: 10px;
+          color: #888;
+          text-align: center;
+          user-select: none;
         }
         
         .cell {
@@ -2374,97 +2382,104 @@ export default function Season2MapPlanner() {
           )}
 
 
-          <div className="map-grid">
-            {mapData.map((row, rowIdx) =>
-              row.map((cell, colIdx) => {
-                const key = `${rowIdx}-${colIdx}`;
-                const assignedAlliance = cellAssignments[key];
-                const alliance = alliances.find(a => a.id === assignedAlliance);
-                const config = typeConfig[cell.type];
-                const lvlColor = levelColors[cell.lvl] || levelColors[1];
-                // Calculate colors based on accessibility mode
-                let cellColor, borderColor, shadowColor, tagColor, textColor;
-                const accessibilityPattern = getAccessibilityPattern(cell.type);
-                
-                if (accessibilityMode) {
-                  // Grayscale/high-contrast mode: consistent dark background with white text
-                  // Use border brightness to indicate level (lighter border = higher level)
-                  const baseBrightness = alliance ? 40 : 35; // Dark gray background
-                  const levelBorderBrightness = 60 + (cell.lvl * 5); // Range: 60-90% for borders
+          <div className="map-grid-axis">
+            <div className="axis-cell" />
+            {mapData[0].map((_, colIdx) => (
+              <div key={`col-${colIdx}`} className="axis-cell">{colIdx + 1}</div>
+            ))}
+            {mapData.map((row, rowIdx) => (
+              <React.Fragment key={`row-${rowIdx}`}>
+                <div className="axis-cell">{rowIdx + 1}</div>
+                {row.map((cell, colIdx) => {
+                  const key = `${rowIdx}-${colIdx}`;
+                  const assignedAlliance = cellAssignments[key];
+                  const alliance = alliances.find(a => a.id === assignedAlliance);
+                  const config = typeConfig[cell.type];
+                  const lvlColor = levelColors[cell.lvl] || levelColors[1];
+                  // Calculate colors based on accessibility mode
+                  let cellColor, borderColor, shadowColor, tagColor, textColor;
+                  const accessibilityPattern = getAccessibilityPattern(cell.type);
                   
-                  // Consistent dark background for all cells (easy to read white text)
-                  cellColor = `hsl(0, 0%, ${baseBrightness}%)`;
-                  
-                  // Border brightness indicates level (higher level = brighter border)
-                  borderColor = `hsl(0, 0%, ${levelBorderBrightness}%)`;
-                  
-                  shadowColor = 'rgba(0,0,0,0.8)';
-                  
-                  // Always use white text on dark background for maximum contrast
-                  textColor = '#ffffff';
-                  tagColor = '#ffffff';
-                } else {
-                  // Normal color mode
-                  cellColor = alliance ? alliance.color : config.baseColor;
-                  borderColor = alliance ? alliance.color : lvlColor.border;
-                  shadowColor = alliance 
-                    ? `${alliance.color}88`
-                    : lvlColor.glow;
-                  tagColor = alliance ? alliance.color : '#ffffff';
-                  textColor = '#ffffff';
-                }
+                  if (accessibilityMode) {
+                    // Grayscale/high-contrast mode: consistent dark background with white text
+                    // Use border brightness to indicate level (lighter border = higher level)
+                    const baseBrightness = alliance ? 40 : 35; // Dark gray background
+                    const levelBorderBrightness = 60 + (cell.lvl * 5); // Range: 60-90% for borders
+                    
+                    // Consistent dark background for all cells (easy to read white text)
+                    cellColor = `hsl(0, 0%, ${baseBrightness}%)`;
+                    
+                    // Border brightness indicates level (higher level = brighter border)
+                    borderColor = `hsl(0, 0%, ${levelBorderBrightness}%)`;
+                    
+                    shadowColor = 'rgba(0,0,0,0.8)';
+                    
+                    // Always use white text on dark background for maximum contrast
+                    textColor = '#ffffff';
+                    tagColor = '#ffffff';
+                  } else {
+                    // Normal color mode
+                    cellColor = alliance ? alliance.color : config.baseColor;
+                    borderColor = alliance ? alliance.color : lvlColor.border;
+                    shadowColor = alliance 
+                      ? `${alliance.color}88`
+                      : lvlColor.glow;
+                    tagColor = alliance ? alliance.color : '#ffffff';
+                    textColor = '#ffffff';
+                  }
 
-                const cellStyle = {
-                  background: alliance ? cellColor : cellColor,
-                  border: `3px solid ${borderColor}`,
-                  borderColor: borderColor,
-                  opacity: accessibilityMode ? accessibilityPattern.opacity : 1,
-                  filter: accessibilityMode ? 'grayscale(100%) contrast(1.3)' : 'none',
-                  color: accessibilityMode ? textColor : undefined,
-                };
+                  const cellStyle = {
+                    background: alliance ? cellColor : cellColor,
+                    border: `3px solid ${borderColor}`,
+                    borderColor: borderColor,
+                    opacity: accessibilityMode ? accessibilityPattern.opacity : 1,
+                    filter: accessibilityMode ? 'grayscale(100%) contrast(1.3)' : 'none',
+                    color: accessibilityMode ? textColor : undefined,
+                  };
 
-                return (
-                  <div
-                    key={key}
-                    className="cell"
-                    style={cellStyle}
-                    onClick={() => !screenshotMode && toggleCell(rowIdx, colIdx)}
-                    onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
-                    onMouseLeave={() => setHoveredCell(null)}
-                  >
-                    <span 
-                      className="cell-type" 
-                      style={{ 
-                        color: accessibilityMode ? textColor : '#ffffff',
-                        fontWeight: '600'
-                      }}
+                  return (
+                    <div
+                      key={key}
+                      className="cell"
+                      style={cellStyle}
+                      onClick={() => !screenshotMode && toggleCell(rowIdx, colIdx)}
+                      onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
+                      onMouseLeave={() => setHoveredCell(null)}
                     >
-                      {config.name}
-                    </span>
-                    <span 
-                      className="cell-level" 
-                      style={{ 
-                        color: accessibilityMode ? textColor : '#ffffff',
-                        fontWeight: '700'
-                      }}
-                    >
-                      L{cell.lvl}
-                    </span>
-                    {alliance && (
                       <span 
-                        className="cell-tag" 
+                        className="cell-type" 
                         style={{ 
-                          color: tagColor,
+                          color: accessibilityMode ? textColor : '#ffffff',
+                          fontWeight: '600'
+                        }}
+                      >
+                        {config.name}
+                      </span>
+                      <span 
+                        className="cell-level" 
+                        style={{ 
+                          color: accessibilityMode ? textColor : '#ffffff',
                           fontWeight: '700'
                         }}
                       >
-                        {alliance.tag}
+                        L{cell.lvl}
                       </span>
-                    )}
-                  </div>
-                );
-              })
-            )}
+                      {alliance && (
+                        <span 
+                          className="cell-tag" 
+                          style={{ 
+                            color: tagColor,
+                            fontWeight: '700'
+                          }}
+                        >
+                          {alliance.tag}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            ))}
           </div>
         </div>
 
