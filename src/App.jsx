@@ -150,25 +150,6 @@ const getUserName = () => {
 
 let USER_NAME = getUserName();
 
-// Build indexed tile data for optimizer
-const allTiles = [];
-mapData.forEach((row, rowIdx) => {
-  row.forEach((cell, colIdx) => {
-    const bonusMatch = cell.bonus.match(/(\d+)%\s+(.+)/);
-    if (bonusMatch) {
-      allTiles.push({
-        key: `${rowIdx}-${colIdx}`,
-        row: rowIdx,
-        col: colIdx,
-        cell,
-        bonusType: bonusMatch[2],
-        bonusValue: parseInt(bonusMatch[1]),
-        level: cell.lvl,
-      });
-    }
-  });
-});
-
 export default function Season2MapPlanner() {
   const [alliances, setAlliances] = useState(defaultAlliances);
   const [activeAlliance, setActiveAlliance] = useState('nova');
@@ -192,13 +173,6 @@ export default function Season2MapPlanner() {
   // Accessibility mode (grayscale/high-contrast)
   const [accessibilityMode, setAccessibilityMode] = useState(false);
   
-  // Resource optimizer
-  const [showOptimizer, setShowOptimizer] = useState(false);
-  const [optimizerResource, setOptimizerResource] = useState('Food');
-  const [optimizerCount, setOptimizerCount] = useState(10);
-  const [optimizerMaxLevel, setOptimizerMaxLevel] = useState(6);
-  const [optimizerResults, setOptimizerResults] = useState(null);
-
   // Persistence state
   const [lastSaved, setLastSaved] = useState(null);
   const [saveStatus, setSaveStatus] = useState('');
@@ -1133,58 +1107,6 @@ export default function Season2MapPlanner() {
     return patterns[type] || patterns.dig;
   };
 
-  // Resource Optimizer
-  const runOptimizer = () => {
-    const available = allTiles.filter(t => 
-      t.bonusType === optimizerResource && 
-      t.level <= optimizerMaxLevel &&
-      !cellAssignments[t.key]
-    );
-    
-    // Sort by bonus value (highest first), then by level (lowest first for easier acquisition)
-    available.sort((a, b) => {
-      if (b.bonusValue !== a.bonusValue) return b.bonusValue - a.bonusValue;
-      return a.level - b.level;
-    });
-    
-    const selected = available.slice(0, optimizerCount);
-    const totalBonus = selected.reduce((sum, t) => sum + t.bonusValue, 0);
-    
-    setOptimizerResults({
-      tiles: selected,
-      totalBonus,
-      byLevel: selected.reduce((acc, t) => {
-        acc[t.level] = (acc[t.level] || 0) + 1;
-        return acc;
-      }, {}),
-    });
-  };
-
-  const applyOptimizerResults = () => {
-    if (!optimizerResults) return;
-    
-    // Check if any target tiles are locked
-    const lockedTiles = optimizerResults.tiles.filter(t => {
-      const assignedAlliance = cellAssignments[t.key];
-      return assignedAlliance && lockedAlliances.has(assignedAlliance) && !isAdmin;
-    });
-    
-    if (lockedTiles.length > 0 && !isAdmin) {
-      alert(`${lockedTiles.length} tile(s) are locked. Admin access required to modify locked tiles.`);
-      return;
-    }
-    
-    const newAssignments = { ...cellAssignments };
-    optimizerResults.tiles.forEach(t => {
-      newAssignments[t.key] = activeAlliance;
-    });
-    updateAssignments(newAssignments);
-    setOptimizerResults(null);
-    setShowOptimizer(false);
-  };
-
-  const highlightOptimized = optimizerResults ? new Set(optimizerResults.tiles.map(t => t.key)) : new Set();
-
   // Format last saved time
   const formatLastSaved = () => {
     if (!lastSaved) return 'Never';
@@ -1232,15 +1154,6 @@ export default function Season2MapPlanner() {
         
         .cell.dimmed {
           opacity: 0.3;
-        }
-        
-        .cell.optimized {
-          animation: pulse 1s infinite;
-        }
-        
-        @keyframes pulse {
-          0%, 100% { box-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #0ff; }
-          50% { box-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #0ff; }
         }
         
         .cell-tag {
@@ -1732,14 +1645,6 @@ export default function Season2MapPlanner() {
             <div className="toolbar-divider" />
             
             <button 
-              className="btn btn-small"
-              onClick={() => setShowOptimizer(true)}
-              style={{ background: 'linear-gradient(135deg, #2a3a4a 0%, #1a2a3e 100%)' }}
-            >
-              🎯 Optimizer
-            </button>
-            
-            <button 
               className={`btn btn-small ${accessibilityMode ? 'active' : ''}`}
               onClick={() => setAccessibilityMode(!accessibilityMode)}
               title="Toggle Grayscale/High-Contrast Mode"
@@ -1981,8 +1886,6 @@ export default function Season2MapPlanner() {
                 const alliance = alliances.find(a => a.id === assignedAlliance);
                 const config = typeConfig[cell.type];
                 const lvlColor = levelColors[cell.lvl] || levelColors[1];
-                const isOptimized = highlightOptimized.has(key);
-                
                 // Calculate colors based on accessibility mode
                 let cellColor, borderColor, shadowColor, tagColor, textColor;
                 const accessibilityPattern = getAccessibilityPattern(cell.type);
@@ -2027,7 +1930,7 @@ export default function Season2MapPlanner() {
                 return (
                   <div
                     key={key}
-                    className={`cell ${isOptimized ? 'optimized' : ''}`}
+                    className="cell"
                     style={cellStyle}
                     onClick={() => !screenshotMode && toggleCell(rowIdx, colIdx)}
                     onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
@@ -2459,124 +2362,6 @@ export default function Season2MapPlanner() {
                 </div>
               );
             })()}
-          </div>
-        </div>
-      )}
-
-      {/* Resource Optimizer Modal */}
-      {showOptimizer && (
-        <div className="modal-overlay" onClick={() => { setShowOptimizer(false); setOptimizerResults(null); }}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ minWidth: '400px' }}>
-            <h3 style={{ marginTop: 0, fontFamily: '"Orbitron", monospace' }}>🎯 Resource Optimizer</h3>
-            <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
-              Find the best unclaimed tiles to maximize a specific resource bonus.
-            </p>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-              <div>
-                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Resource to Maximize</label>
-                <select 
-                  className="select"
-                  value={optimizerResource}
-                  onChange={e => setOptimizerResource(e.target.value)}
-                  style={{ width: '100%' }}
-                >
-                  <option value="Food">Food</option>
-                  <option value="Iron">Iron</option>
-                  <option value="Coin">Coin</option>
-                  <option value="Gathering">Gathering</option>
-                  <option value="Healing">Healing</option>
-                  <option value="Construction">Construction</option>
-                  <option value="Research">Research</option>
-                  <option value="Training">Training</option>
-                </select>
-              </div>
-              
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Number of Tiles</label>
-                  <input
-                    className="input"
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={optimizerCount}
-                    onChange={e => setOptimizerCount(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
-                    style={{ width: '100%', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Max Level</label>
-                  <select 
-                    className="select"
-                    value={optimizerMaxLevel}
-                    onChange={e => setOptimizerMaxLevel(parseInt(e.target.value))}
-                    style={{ width: '100%' }}
-                  >
-                    {[1,2,3,4,5,6].map(lvl => (
-                      <option key={lvl} value={lvl}>Level {lvl} ({levelInfo[lvl-1].temp})</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              
-              <button 
-                className="btn"
-                onClick={runOptimizer}
-                style={{ width: '100%', background: 'linear-gradient(135deg, #3a4a5a 0%, #2a3a4e 100%)' }}
-              >
-                🔍 Find Optimal Tiles
-              </button>
-            </div>
-
-            {optimizerResults && (
-              <div style={{ 
-                background: 'rgba(0,255,136,0.1)', 
-                border: '1px solid rgba(0,255,136,0.3)',
-                borderRadius: '8px',
-                padding: '12px',
-                marginBottom: '16px',
-              }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px', color: '#00ff88' }}>
-                  Results: +{optimizerResults.totalBonus}% {optimizerResource}
-                </div>
-                <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '8px' }}>
-                  Found {optimizerResults.tiles.length} tiles
-                  {Object.entries(optimizerResults.byLevel).map(([lvl, count]) => (
-                    <span key={lvl} style={{ marginLeft: '8px', color: levelColors[lvl].border }}>
-                      L{lvl}×{count}
-                    </span>
-                  ))}
-                </div>
-                <div style={{ fontSize: '11px', color: '#666', maxHeight: '100px', overflowY: 'auto' }}>
-                  {optimizerResults.tiles.map((t, i) => (
-                    <span key={t.key} style={{ marginRight: '8px' }}>
-                      ({t.row},{t.col}): +{t.bonusValue}%
-                      {i < optimizerResults.tiles.length - 1 && ', '}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button 
-                className="btn" 
-                onClick={() => { setShowOptimizer(false); setOptimizerResults(null); }}
-                style={{ flex: 1 }}
-              >
-                Cancel
-              </button>
-              {optimizerResults && (
-                <button 
-                  className="btn btn-success" 
-                  onClick={applyOptimizerResults}
-                  style={{ flex: 1 }}
-                >
-                  ✓ Apply to {alliances.find(a => a.id === activeAlliance)?.name}
-                </button>
-              )}
-            </div>
           </div>
         </div>
       )}
