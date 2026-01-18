@@ -1199,39 +1199,35 @@ export default function Season2MapPlanner() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #0a0a12 0%, #1a1a2e 50%, #16213e 100%)',
+      background: '#1a1a2e',
       color: '#e0e0e0',
-      fontFamily: '"Rajdhani", "Segoe UI", sans-serif',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
       padding: screenshotMode ? '40px' : '20px',
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700&display=swap');
-        
         .map-grid { 
           display: grid;
           grid-template-columns: repeat(13, 1fr);
-          gap: 3px;
-          max-width: 850px;
+          gap: 4px;
+          max-width: 1000px;
           margin: 0 auto;
         }
         
         .cell {
           aspect-ratio: 1;
-          border-radius: 6px;
+          border-radius: 4px;
           cursor: pointer;
-          transition: all 0.2s ease;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          font-size: 10px;
+          font-size: 14px;
           position: relative;
           overflow: hidden;
         }
         
         .cell:hover {
-          transform: scale(1.15);
-          z-index: 10;
+          opacity: 0.8;
         }
         
         .cell.dimmed {
@@ -1249,55 +1245,48 @@ export default function Season2MapPlanner() {
         
         .cell-tag {
           position: absolute;
-          bottom: 1px;
-          font-size: 6px;
-          font-weight: 700;
-          letter-spacing: -0.5px;
-          text-shadow: 0 0 2px rgba(0,0,0,0.8);
+          bottom: 2px;
+          font-size: 10px;
         }
         
         .cell-icon {
-          font-size: 14px;
+          font-size: 18px;
           line-height: 1;
         }
         
         .cell-level {
-          font-size: 7px;
-          font-weight: 700;
-          opacity: 0.9;
-        }
-        
-        .cell-type {
-          font-size: 7px;
-          font-weight: 600;
-          text-align: center;
-          line-height: 1.1;
-          margin-bottom: 1px;
-        }
-        
-        .panel {
-          background: rgba(20, 20, 35, 0.95);
-          border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 12px;
-          padding: 16px;
-          backdrop-filter: blur(10px);
-        }
-        
-        .btn {
-          background: linear-gradient(135deg, #2a2a4a 0%, #1a1a2e 100%);
-          border: 1px solid rgba(255,255,255,0.2);
-          color: #e0e0e0;
-          padding: 8px 16px;
-          border-radius: 8px;
-          cursor: pointer;
-          transition: all 0.2s;
-          font-family: inherit;
           font-size: 12px;
         }
         
+        .cell-type {
+          font-size: 11px;
+          text-align: center;
+          line-height: 1.2;
+          margin-bottom: 2px;
+        }
+        
+        .panel {
+          background: #2a2a3e;
+          border: 2px solid rgba(255,255,255,0.2);
+          border-radius: 8px;
+          padding: 20px;
+        }
+        
+        .btn {
+          background: #3a3a4a;
+          border: 2px solid rgba(255,255,255,0.3);
+          color: #e0e0e0;
+          padding: 12px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 16px;
+          font-weight: 600;
+        }
+        
         .btn:hover {
-          background: linear-gradient(135deg, #3a3a5a 0%, #2a2a3e 100%);
-          border-color: rgba(255,255,255,0.4);
+          background: #4a4a5a;
+          border-color: rgba(255,255,255,0.5);
         }
         
         .btn:disabled {
@@ -1310,28 +1299,26 @@ export default function Season2MapPlanner() {
         }
         
         .btn-small {
-          padding: 4px 8px;
-          font-size: 11px;
+          padding: 8px 12px;
+          font-size: 14px;
         }
         
         .btn-danger {
-          background: linear-gradient(135deg, #4a2a2a 0%, #2e1a1a 100%);
-          border-color: rgba(255,100,100,0.3);
-        }
-        
-        .btn-danger:hover {
-          background: linear-gradient(135deg, #5a3a3a 0%, #3e2a2a 100%);
+          background: #5a2a2a;
           border-color: rgba(255,100,100,0.5);
         }
         
+        .btn-danger:hover {
+          background: #6a3a3a;
+        }
+        
         .btn-success {
-          background: linear-gradient(135deg, #2a4a2a 0%, #1a2e1a 100%);
-          border-color: rgba(100,255,100,0.3);
+          background: #2a5a2a;
+          border-color: rgba(100,255,100,0.5);
         }
         
         .btn-success:hover {
-          background: linear-gradient(135deg, #3a5a3a 0%, #2a3e2a 100%);
-          border-color: rgba(100,255,100,0.5);
+          background: #3a6a3a;
         }
         
         .tooltip {
@@ -1349,26 +1336,27 @@ export default function Season2MapPlanner() {
         .alliance-btn {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          border-radius: 8px;
+          gap: 12px;
+          padding: 12px 16px;
+          border-radius: 6px;
           cursor: pointer;
-          transition: all 0.2s;
           border: 2px solid transparent;
-          background: rgba(255,255,255,0.05);
+          background: rgba(255,255,255,0.1);
+          font-size: 16px;
         }
         
         .alliance-btn:hover {
-          background: rgba(255,255,255,0.1);
-        }
-        
-        .alliance-btn.active {
           background: rgba(255,255,255,0.15);
         }
         
+        .alliance-btn.active {
+          background: rgba(255,255,255,0.2);
+          border-color: currentColor;
+        }
+        
         .alliance-color {
-          width: 16px;
-          height: 16px;
+          width: 24px;
+          height: 24px;
           border-radius: 4px;
           flex-shrink: 0;
         }
@@ -1450,7 +1438,6 @@ export default function Season2MapPlanner() {
         .screenshot-watermark {
           text-align: center;
           padding: 16px;
-          font-family: 'Orbitron', monospace;
           color: rgba(255,255,255,0.5);
           font-size: 12px;
         }
@@ -1541,23 +1528,17 @@ export default function Season2MapPlanner() {
       {!screenshotMode && (
         <header style={{ textAlign: 'center', marginBottom: '20px' }}>
           <h1 style={{
-            fontFamily: '"Orbitron", monospace',
-            fontSize: '2rem',
+            fontSize: '2.5rem',
             fontWeight: 700,
-            background: 'linear-gradient(135deg, #ffd700 0%, #ff8c00 50%, #ff6347 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            textShadow: '0 0 30px rgba(255,215,0,0.3)',
+            color: '#ffd700',
             margin: 0,
           }}>
             POLAR STORM
           </h1>
           <p style={{ 
-            fontFamily: '"Orbitron", monospace',
-            color: '#888',
-            fontSize: '0.8rem',
-            letterSpacing: '3px',
-            marginTop: '4px',
+            color: '#aaa',
+            fontSize: '1.2rem',
+            marginTop: '8px',
           }}>
             SEASON 2 TERRITORY PLANNER
           </p>
@@ -2035,23 +2016,12 @@ export default function Season2MapPlanner() {
                 }
 
                 const cellStyle = {
-                  background: accessibilityMode
-                    ? `${cellColor}`
-                    : alliance 
-                      ? `linear-gradient(135deg, ${cellColor}dd 0%, ${cellColor}99 100%)`
-                      : `linear-gradient(135deg, ${cellColor} 0%, ${cellColor}dd 100%)`,
-                  border: accessibilityMode
-                    ? `${accessibilityPattern.borderWidth} ${accessibilityPattern.borderStyle} ${borderColor}`
-                    : `2px solid ${borderColor}`,
+                  background: alliance ? cellColor : cellColor,
+                  border: `3px solid ${borderColor}`,
                   borderColor: borderColor,
                   opacity: accessibilityMode ? accessibilityPattern.opacity : 1,
                   filter: accessibilityMode ? 'grayscale(100%) contrast(1.3)' : 'none',
-                  boxShadow: accessibilityMode
-                    ? `0 0 4px ${shadowColor}, inset 0 0 2px rgba(0,0,0,0.1)`
-                    : alliance 
-                      ? `0 0 12px ${shadowColor}, inset 0 0 8px rgba(255,255,255,0.2)`
-                      : `0 0 6px ${shadowColor}`,
-                  color: accessibilityMode ? textColor : undefined, // Set text color for accessibility mode
+                  color: accessibilityMode ? textColor : undefined,
                 };
 
                 return (
@@ -2066,10 +2036,8 @@ export default function Season2MapPlanner() {
                     <span 
                       className="cell-type" 
                       style={{ 
-                        color: accessibilityMode ? textColor : undefined,
-                        textShadow: accessibilityMode 
-                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
-                          : '0 0 2px rgba(0,0,0,0.8)'
+                        color: accessibilityMode ? textColor : '#ffffff',
+                        fontWeight: '600'
                       }}
                     >
                       {config.name}
@@ -2077,10 +2045,8 @@ export default function Season2MapPlanner() {
                     <span 
                       className="cell-level" 
                       style={{ 
-                        color: accessibilityMode ? textColor : undefined,
-                        textShadow: accessibilityMode 
-                          ? (textColor === '#ffffff' ? '0 0 2px rgba(0,0,0,0.9)' : '0 0 2px rgba(255,255,255,0.9)')
-                          : '0 0 2px rgba(0,0,0,0.8)'
+                        color: accessibilityMode ? textColor : '#ffffff',
+                        fontWeight: '700'
                       }}
                     >
                       L{cell.lvl}
@@ -2090,10 +2056,7 @@ export default function Season2MapPlanner() {
                         className="cell-tag" 
                         style={{ 
                           color: tagColor,
-                          textShadow: accessibilityMode 
-                            ? (tagColor === '#ffffff' ? '0 0 3px rgba(0,0,0,0.9)' : '0 0 3px rgba(255,255,255,0.9)')
-                            : '0 0 2px rgba(0,0,0,0.8)',
-                          fontWeight: accessibilityMode ? '900' : '700'
+                          fontWeight: '700'
                         }}
                       >
                         {alliance.tag}
