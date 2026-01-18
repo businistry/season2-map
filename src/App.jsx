@@ -104,6 +104,21 @@ const safeRemove = (key) => {
 const sanitizeServerId = (raw) =>
   raw.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
 
+const normalizeAllianceName = (name) => name.trim().replace(/\s+/g, ' ');
+const normalizeAllianceKey = (name) => normalizeAllianceName(name).toLowerCase();
+
+const buildAllianceTag = (name) => {
+  const letters = name.replace(/[^a-z0-9]/gi, '');
+  return (letters.substring(0, 4) || 'ALLY').toUpperCase();
+};
+
+const allianceColorPalette = ['#00ff88', '#ff4444', '#ff8800', '#4682b4', '#9370db', '#6b8e23', '#dc143c', '#ffd700'];
+const pickAllianceColor = (existing) => {
+  const used = new Set(existing.map(a => a.color));
+  const available = allianceColorPalette.find(color => !used.has(color));
+  return available || `#${Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')}`;
+};
+
 // Firebase configuration
 const ROOM_ID = 'season2-plan'; // Shared room ID for all alliances (fallback)
 const PRESENCE_COLLECTION = 'presence'; // Track active users
@@ -162,6 +177,16 @@ export default function Season2MapPlanner() {
   const [newAllianceColor, setNewAllianceColor] = useState('#ff8800');
   const [showAddAlliance, setShowAddAlliance] = useState(false);
   const [selectedAllianceStats, setSelectedAllianceStats] = useState(null);
+  const [allianceAuth, setAllianceAuth] = useState({});
+  const [authorizedAllianceIds, setAuthorizedAllianceIds] = useState([]);
+  const [showAllianceAccess, setShowAllianceAccess] = useState(false);
+  const [accessAllianceName, setAccessAllianceName] = useState('');
+  const [accessPasscode, setAccessPasscode] = useState('');
+  const [accessError, setAccessError] = useState('');
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [passcodeDraft, setPasscodeDraft] = useState('');
+  const [passcodeConfirm, setPasscodeConfirm] = useState('');
+  const [passcodeMessage, setPasscodeMessage] = useState('');
   
   // History for undo/redo
   const [history, setHistory] = useState([{}]);
@@ -231,8 +256,43 @@ export default function Season2MapPlanner() {
     }
   }, [isConnecting, useFirebase]);
 
+  useEffect(() => {
+    setPasscodeDraft('');
+    setPasscodeConfirm('');
+    setPasscodeMessage('');
+  }, [editingAlliance]);
+
+  useEffect(() => {
+    if (!showAllianceAccess) {
+      setAccessAllianceName('');
+      setAccessPasscode('');
+      setAccessError('');
+      setAccessLoading(false);
+    }
+  }, [showAllianceAccess]);
+
+  useEffect(() => {
+    setAuthorizedAllianceIds([]);
+  }, [currentServerId]);
+
   const mapRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const isAuthorizedForAlliance = useCallback((allianceId) => {
+    return isAdmin || authorizedAllianceIds.includes(allianceId);
+  }, [isAdmin, authorizedAllianceIds]);
+
+  const hashPasscode = async (passcode) => {
+    if (!window.crypto?.subtle) {
+      throw new Error('Secure hashing is not available in this browser.');
+    }
+    const normalized = passcode.trim();
+    const encoded = new TextEncoder().encode(normalized);
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', encoded);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join('');
+  };
 
   // Initialize Firebase connection and load data
   useEffect(() => {
@@ -257,10 +317,14 @@ export default function Season2MapPlanner() {
             setHistoryIndex(0);
             setLastSaved(data.savedAt ? new Date(data.savedAt) : null);
             setSaveStatus('Loaded from localStorage');
+            setAllianceAuth(data.allianceAuth || {});
             // Load locked alliances
             if (data.lockedAlliances) {
               setLockedAlliances(new Set(data.lockedAlliances));
             }
+        if (data.allianceAuth) {
+          setAllianceAuth(data.allianceAuth);
+        }
             // Track reset timestamp
             if (data.resetTimestamp) {
               lastResetTimestampRef.current = data.resetTimestamp;
@@ -302,6 +366,7 @@ export default function Season2MapPlanner() {
             setLastSaved(data.updatedAt?.toDate() || null);
             setSaveStatus('Connected - Real-time collaboration active');
             setIsConnected(true);
+            setAllianceAuth(data.allianceAuth || {});
           }
         } else {
           // Create initial room document
@@ -312,6 +377,7 @@ export default function Season2MapPlanner() {
             cellAssignments: {},
             activeAlliance: 'nova',
             lockedAlliances: [],
+            allianceAuth: {},
             updatedAt: serverTimestamp(),
           });
           setSaveStatus('Connected - Room created');
@@ -347,6 +413,7 @@ export default function Season2MapPlanner() {
               } else {
                 setLockedAlliances(new Set());
               }
+            setAllianceAuth(data.allianceAuth || {});
               setLastSaved(data.updatedAt?.toDate() || null);
               setSaveStatus('Map was reset');
               setTimeout(() => {
@@ -376,6 +443,7 @@ export default function Season2MapPlanner() {
             if (data.lockedAlliances) {
               setLockedAlliances(new Set(data.lockedAlliances));
             }
+            setAllianceAuth(data.allianceAuth || {});
             
             // Only update if different (to avoid unnecessary re-renders)
             if (JSON.stringify(newAssignments) !== JSON.stringify(cellAssignments)) {
@@ -516,6 +584,7 @@ export default function Season2MapPlanner() {
           alliances,
           cellAssignments,
           activeAlliance,
+          allianceAuth,
           lockedAlliances: Array.from(lockedAlliances),
           savedAt: new Date().toISOString(),
         };
@@ -557,7 +626,7 @@ export default function Season2MapPlanner() {
     // Debounce saves
     const timeoutId = setTimeout(saveData, 500);
     return () => clearTimeout(timeoutId);
-  }, [alliances, cellAssignments, activeAlliance, planName, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances, showOnboarding]);
+  }, [alliances, cellAssignments, activeAlliance, planName, allianceAuth, isLoaded, useFirebase, isConnected, currentServerId, lockedAlliances, showOnboarding]);
 
   // Export data as JSON file
   const exportData = () => {
@@ -565,6 +634,7 @@ export default function Season2MapPlanner() {
       version: STORAGE_VERSION,
       planName,
       alliances,
+      allianceAuth,
       cellAssignments,
       activeAlliance,
       lockedAlliances: Array.from(lockedAlliances),
@@ -638,6 +708,8 @@ export default function Season2MapPlanner() {
       setHistory([{}]);
       setHistoryIndex(0);
       setLastSaved(null);
+      setAllianceAuth({});
+      setAuthorizedAllianceIds([]);
       setSaveStatus('Data cleared');
       setTimeout(() => setSaveStatus(''), 2000);
     }
@@ -674,6 +746,11 @@ export default function Season2MapPlanner() {
     const key = `${row}-${col}`;
     const currentAssignment = cellAssignments[key];
     const currentAlliance = alliances.find(a => a.id === currentAssignment);
+    const activeAllianceName = alliances.find(a => a.id === activeAlliance)?.name;
+
+    if (!requireAllianceAccess(activeAlliance, activeAllianceName)) {
+      return;
+    }
     
     // Check if tile is locked (and user is not admin)
     if (currentAssignment && lockedAlliances.has(currentAssignment) && !isAdmin) {
@@ -699,9 +776,10 @@ export default function Season2MapPlanner() {
   };
 
   const clearAlliance = (allianceId) => {
+    const alliance = alliances.find(a => a.id === allianceId);
+    if (!requireAllianceAccess(allianceId, alliance?.name)) return;
     // Check if alliance tiles are locked (and user is not admin)
     if (lockedAlliances.has(allianceId) && !isAdmin) {
-      const alliance = alliances.find(a => a.id === allianceId);
       alert(`Tiles for ${alliance?.name || 'this alliance'} are locked. Admin access required to clear.`);
       return;
     }
@@ -716,8 +794,8 @@ export default function Season2MapPlanner() {
   };
 
   const clearAll = () => {
-    if (lockedAlliances.size > 0 && !isAdmin) {
-      alert('Some alliances have locked their tiles. Admin access required to clear all.');
+    if (!isAdmin) {
+      alert('Admin access required to clear all territories.');
       return;
     }
     updateAssignments({});
@@ -725,6 +803,8 @@ export default function Season2MapPlanner() {
 
   // Toggle lock for an alliance
   const toggleAllianceLock = (allianceId) => {
+    const alliance = alliances.find(a => a.id === allianceId);
+    if (!requireAllianceAccess(allianceId, alliance?.name)) return;
     const newLocked = new Set(lockedAlliances);
     if (newLocked.has(allianceId)) {
       newLocked.delete(allianceId);
@@ -875,6 +955,7 @@ export default function Season2MapPlanner() {
           version: STORAGE_VERSION,
           planName: 'Nova Imperium S2 Plan',
           alliances: alliances, // Keep alliances
+          allianceAuth: allianceAuth,
           cellAssignments: emptyAssignments,
           activeAlliance: activeAlliance,
           lockedAlliances: [],
@@ -892,6 +973,7 @@ export default function Season2MapPlanner() {
         version: STORAGE_VERSION,
         planName: 'Nova Imperium S2 Plan',
         alliances: alliances,
+        allianceAuth: allianceAuth,
         cellAssignments: emptyAssignments,
         activeAlliance: activeAlliance,
         lockedAlliances: [],
@@ -1005,6 +1087,10 @@ export default function Season2MapPlanner() {
   };
 
   const addAlliance = () => {
+    if (!isAdmin) {
+      alert('Only admins can add alliances here. Use Alliance Access to create your alliance.');
+      return;
+    }
     if (!newAllianceName.trim()) return;
     const id = `alliance_${Date.now()}`;
     setAlliances([...alliances, {
@@ -1020,14 +1106,162 @@ export default function Season2MapPlanner() {
     setActiveAlliance(id);
   };
 
+  const openAllianceAccess = (name = '') => {
+    setAccessAllianceName(name);
+    setShowAllianceAccess(true);
+  };
+
+  const requireAllianceAccess = (allianceId, allianceName) => {
+    if (isAuthorizedForAlliance(allianceId)) return true;
+    openAllianceAccess(allianceName || '');
+    return false;
+  };
+
+  const handleAllianceAccess = async () => {
+    const name = normalizeAllianceName(accessAllianceName);
+    if (!name) {
+      setAccessError('Enter your alliance name.');
+      return;
+    }
+    if (!accessPasscode.trim()) {
+      setAccessError('Enter your alliance passcode.');
+      return;
+    }
+    setAccessLoading(true);
+    setAccessError('');
+    try {
+      const nameKey = normalizeAllianceKey(name);
+      let alliance = alliances.find(a => normalizeAllianceKey(a.name) === nameKey);
+      let nextAlliances = alliances;
+      if (!alliance) {
+        const id = `alliance_${Date.now()}`;
+        alliance = {
+          id,
+          name,
+          tag: buildAllianceTag(name),
+          color: pickAllianceColor(alliances),
+        };
+        nextAlliances = [...alliances, alliance];
+        setAlliances(nextAlliances);
+      }
+
+      const existingAuth = allianceAuth[alliance.id];
+      const hashed = await hashPasscode(accessPasscode);
+
+      if (existingAuth && existingAuth.passcodeHash !== hashed) {
+        setAccessError('Incorrect passcode for this alliance.');
+        setAccessLoading(false);
+        return;
+      }
+
+      if (!existingAuth) {
+        setAllianceAuth({
+          ...allianceAuth,
+          [alliance.id]: {
+            allianceId: alliance.id,
+            allianceName: alliance.name,
+            nameKey,
+            passcodeHash: hashed,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        });
+      }
+
+      if (!authorizedAllianceIds.includes(alliance.id)) {
+        setAuthorizedAllianceIds([...authorizedAllianceIds, alliance.id]);
+      }
+
+      setActiveAlliance(alliance.id);
+      setShowAllianceAccess(false);
+    } catch (error) {
+      console.error('Alliance access failed:', error);
+      setAccessError('Unable to verify passcode. Try again.');
+    } finally {
+      setAccessLoading(false);
+    }
+  };
+
+  const handlePasscodeUpdate = async (alliance) => {
+    if (!alliance) return;
+    if (!isAuthorizedForAlliance(alliance.id)) {
+      alert('You are not authorized to change this passcode.');
+      return;
+    }
+    if (!passcodeDraft.trim()) {
+      setPasscodeMessage('Enter a new passcode.');
+      return;
+    }
+    if (passcodeDraft.trim() !== passcodeConfirm.trim()) {
+      setPasscodeMessage('Passcodes do not match.');
+      return;
+    }
+    try {
+      const hashed = await hashPasscode(passcodeDraft);
+      const nameKey = normalizeAllianceKey(alliance.name);
+      setAllianceAuth((prev) => ({
+        ...prev,
+        [alliance.id]: {
+          allianceId: alliance.id,
+          allianceName: alliance.name,
+          nameKey,
+          passcodeHash: hashed,
+          createdAt: prev[alliance.id]?.createdAt || Date.now(),
+          updatedAt: Date.now(),
+        },
+      }));
+      setPasscodeDraft('');
+      setPasscodeConfirm('');
+      setPasscodeMessage('Passcode updated.');
+    } catch (error) {
+      console.error('Passcode update failed:', error);
+      setPasscodeMessage('Unable to update passcode.');
+    }
+  };
+
   const updateAlliance = (id, updates) => {
+    if (!requireAllianceAccess(id, alliances.find(a => a.id === id)?.name)) return;
+    if (updates.name) {
+      const nameKey = normalizeAllianceKey(updates.name);
+      const conflict = alliances.some(a => a.id !== id && normalizeAllianceKey(a.name) === nameKey);
+      if (conflict) {
+        alert('An alliance with that name already exists.');
+        return;
+      }
+    }
     setAlliances(alliances.map(a => a.id === id ? { ...a, ...updates } : a));
+    if (updates.name) {
+      const nameKey = normalizeAllianceKey(updates.name);
+      setAllianceAuth((prev) => {
+        const existing = prev[id];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [id]: {
+            ...existing,
+            allianceName: updates.name,
+            nameKey,
+            updatedAt: Date.now(),
+          },
+        };
+      });
+    }
   };
 
   const deleteAlliance = (id) => {
+    if (!isAdmin) {
+      alert('Only admins can delete alliances.');
+      return;
+    }
     if (alliances.length <= 1) return;
     clearAlliance(id);
     setAlliances(alliances.filter(a => a.id !== id));
+    setAllianceAuth((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setAuthorizedAllianceIds((prev) => prev.filter(aId => aId !== id));
     if (activeAlliance === id) {
       setActiveAlliance(alliances.find(a => a.id !== id)?.id);
     }
@@ -1791,7 +2025,13 @@ export default function Season2MapPlanner() {
               🏴 ALLIANCES
               <button 
                 className="btn btn-small"
-                onClick={() => setShowAddAlliance(true)}
+                onClick={() => {
+                  if (!isAdmin) {
+                    alert('Only admins can add alliances here. Use Alliance Access to create your alliance.');
+                    return;
+                  }
+                  setShowAddAlliance(true);
+                }}
                 style={{ fontSize: '14px', padding: '4px 10px' }}
               >+</button>
             </h3>
@@ -1802,12 +2042,19 @@ export default function Season2MapPlanner() {
                   key={alliance.id}
                   className={`alliance-btn ${activeAlliance === alliance.id ? 'active' : ''}`}
                   style={{ borderColor: activeAlliance === alliance.id ? alliance.color : 'transparent' }}
-                  onClick={() => setActiveAlliance(alliance.id)}
+                  onClick={() => {
+                    if (requireAllianceAccess(alliance.id, alliance.name)) {
+                      setActiveAlliance(alliance.id);
+                    }
+                  }}
                 >
                   <div className="alliance-color" style={{ background: alliance.color }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {alliance.name}
+                      {!isAuthorizedForAlliance(alliance.id) && !isAdmin && (
+                        <span style={{ fontSize: '10px' }} title="Passcode required">🔐</span>
+                      )}
                       {lockedAlliances.has(alliance.id) && (
                         <span style={{ fontSize: '10px' }} title="Locked">🔒</span>
                       )}
@@ -1831,7 +2078,12 @@ export default function Season2MapPlanner() {
                   </button>
                   <button
                     className="btn btn-small"
-                    onClick={(e) => { e.stopPropagation(); setEditingAlliance(alliance.id); }}
+                    onClick={(e) => { 
+                      e.stopPropagation();
+                      if (requireAllianceAccess(alliance.id, alliance.name)) {
+                        setEditingAlliance(alliance.id);
+                      }
+                    }}
                     style={{ padding: '2px 6px', fontSize: '10px' }}
                   >⚙</button>
                 </div>
@@ -2251,6 +2503,55 @@ export default function Season2MapPlanner() {
         </div>
       )}
 
+      {/* Alliance Access Modal */}
+      {showAllianceAccess && (
+        <div className="modal-overlay" onClick={() => setShowAllianceAccess(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ minWidth: '360px' }}>
+            <h3 style={{ marginTop: 0, fontFamily: '"Orbitron", monospace' }}>Alliance Access</h3>
+            <p style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+              Enter your alliance name and passcode. If the alliance does not exist, this will create it.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Alliance Name</label>
+                <input
+                  className="input"
+                  value={accessAllianceName}
+                  onChange={e => setAccessAllianceName(e.target.value)}
+                  placeholder="e.g. Nova Imperium"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Passcode</label>
+                <input
+                  className="input"
+                  type="password"
+                  value={accessPasscode}
+                  onChange={e => setAccessPasscode(e.target.value)}
+                  placeholder="Enter passcode"
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  onKeyPress={e => e.key === 'Enter' && handleAllianceAccess()}
+                />
+              </div>
+              {accessError && (
+                <div style={{ fontSize: '11px', color: '#ff8800' }}>
+                  {accessError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button className="btn" onClick={() => setShowAllianceAccess(false)} style={{ flex: 1 }}>
+                  Cancel
+                </button>
+                <button className="btn btn-success" onClick={handleAllianceAccess} style={{ flex: 1 }} disabled={accessLoading}>
+                  {accessLoading ? 'Checking...' : 'Continue'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Alliance Modal */}
       {showAddAlliance && (
         <div className="modal-overlay" onClick={() => setShowAddAlliance(false)}>
@@ -2342,6 +2643,41 @@ export default function Season2MapPlanner() {
                       />
                     </div>
                   </div>
+                  {(isAdmin || isAuthorizedForAlliance(alliance.id)) && (
+                    <div style={{ marginTop: '8px' }}>
+                      <label style={{ fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' }}>Alliance Passcode</label>
+                      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                        <input
+                          className="input"
+                          type="password"
+                          placeholder="New passcode"
+                          value={passcodeDraft}
+                          onChange={e => setPasscodeDraft(e.target.value)}
+                          style={{ flex: 1, boxSizing: 'border-box' }}
+                        />
+                        <input
+                          className="input"
+                          type="password"
+                          placeholder="Confirm passcode"
+                          value={passcodeConfirm}
+                          onChange={e => setPasscodeConfirm(e.target.value)}
+                          style={{ flex: 1, boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <button
+                        className="btn btn-small"
+                        onClick={() => handlePasscodeUpdate(alliance)}
+                        style={{ width: '100%' }}
+                      >
+                        Update Passcode
+                      </button>
+                      {passcodeMessage && (
+                        <div style={{ fontSize: '11px', color: passcodeMessage.includes('updated') ? '#00ff88' : '#ff8800', marginTop: '6px' }}>
+                          {passcodeMessage}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                     <button 
                       className="btn btn-danger" 
