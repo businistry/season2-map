@@ -208,6 +208,8 @@ export default function Season2MapPlanner() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
+
+  const isPrivileged = isAdmin || isServerAdmin;
   
   // History for undo/redo
   const [history, setHistory] = useState([{}]);
@@ -489,8 +491,6 @@ export default function Season2MapPlanner() {
 
   const mapRef = useRef(null);
   const fileInputRef = useRef(null);
-
-  const isPrivileged = isAdmin || isServerAdmin;
 
   const isAuthorizedForAlliance = useCallback((allianceId) => {
     return isPrivileged || authorizedAllianceIds.includes(allianceId);
