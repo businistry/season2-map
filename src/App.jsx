@@ -338,8 +338,8 @@ export default function Season2MapPlanner() {
       .catch((error) => {
         if (!isMounted) return;
         console.error('Discord redirect login failed:', error);
-        setSaveStatus(getAuthErrorMessage(error));
-        setTimeout(() => setSaveStatus(''), 3000);
+        setSaveStatus('Discord login failed');
+        setTimeout(() => setSaveStatus(''), 2000);
       });
     return () => {
       isMounted = false;
@@ -477,7 +477,6 @@ export default function Season2MapPlanner() {
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) {
       console.error('Discord login failed:', error);
-      const statusMessage = getAuthErrorMessage(error);
       const popupErrors = new Set([
         'auth/popup-blocked',
         'auth/popup-closed-by-user',
@@ -488,15 +487,15 @@ export default function Season2MapPlanner() {
           const provider = new OAuthProvider(DISCORD_PROVIDER_ID);
           provider.addScope('identify');
           provider.addScope('email');
-          setSaveStatus(statusMessage);
+          setSaveStatus('Popup blocked - redirecting to Discord...');
           await signInWithRedirect(auth, provider);
           return;
         } catch (redirectError) {
           console.error('Discord redirect login failed:', redirectError);
         }
       }
-      setSaveStatus(statusMessage);
-      setTimeout(() => setSaveStatus(''), 3000);
+      setSaveStatus('Discord login failed');
+      setTimeout(() => setSaveStatus(''), 2000);
     }
   };
 
