@@ -67,7 +67,7 @@ const typeConfig = {
   factory: { name: 'Factory', icon: '🏭', baseColor: '#5a4a3d' },
   train: { name: 'Train Station', icon: '🚂', baseColor: '#4a3d5a' },
   launch: { name: 'Launch Site', icon: '🚀', baseColor: '#5a3d4a' },
-  palace: { name: 'War Palace', icon: '🏰', baseColor: '#6b4a3d' },
+  palace: { name: 'War Palace', icon: '🏰', baseColor: '#6b4a3d', displayLines: ['war', 'palace'] },
   capitol: { name: 'Capitol', icon: '👑', baseColor: '#8b7355' },
 };
 
@@ -238,6 +238,9 @@ export default function Season2MapPlanner() {
   const [serverAdminMessage, setServerAdminMessage] = useState('');
   const [serverAdminAuth, setServerAdminAuth] = useState(null);
   const lastResetTimestampRef = useRef(0);
+  
+  // Derived value for privilege checks
+  const isPrivileged = useMemo(() => isAdmin || isServerAdmin, [isAdmin, isServerAdmin]);
   
   // Firebase/Real-time collaboration state
   const [isConnected, setIsConnected] = useState(false);
@@ -489,8 +492,6 @@ export default function Season2MapPlanner() {
 
   const mapRef = useRef(null);
   const fileInputRef = useRef(null);
-
-  const isPrivileged = isAdmin || isServerAdmin;
 
   const isAuthorizedForAlliance = useCallback((allianceId) => {
     return isPrivileged || authorizedAllianceIds.includes(allianceId);
@@ -2732,24 +2733,53 @@ export default function Season2MapPlanner() {
                       onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
                       onMouseLeave={() => setHoveredCell(null)}
                     >
-                      <span 
-                        className="cell-type" 
-                        style={{ 
-                          color: accessibilityMode ? textColor : '#ffffff',
-                          fontWeight: '600'
-                        }}
-                      >
-                        {config.name}
-                      </span>
-                      <span 
-                        className="cell-level" 
-                        style={{ 
-                          color: accessibilityMode ? textColor : '#ffffff',
-                          fontWeight: '700'
-                        }}
-                      >
-                        L{cell.lvl}
-                      </span>
+                      {config.displayLines && config.displayLines.length >= 2 ? (
+                        // Special rendering for tiles with custom display lines (e.g., War Palace)
+                        <>
+                          <span 
+                            className="cell-type" 
+                            style={{ 
+                              color: accessibilityMode ? textColor : '#ffffff',
+                              fontWeight: '600',
+                              textAlign: 'center'
+                            }}
+                          >
+                            {config.displayLines[0]}
+                          </span>
+                          <span 
+                            className="cell-level" 
+                            style={{ 
+                              color: accessibilityMode ? textColor : '#ffffff',
+                              fontWeight: '700',
+                              textAlign: 'center'
+                            }}
+                          >
+                            {config.displayLines[1]} L{cell.lvl}
+                          </span>
+                        </>
+                      ) : (
+                        // Standard rendering for other tiles
+                        <>
+                          <span 
+                            className="cell-type" 
+                            style={{ 
+                              color: accessibilityMode ? textColor : '#ffffff',
+                              fontWeight: '600'
+                            }}
+                          >
+                            {config.name}
+                          </span>
+                          <span 
+                            className="cell-level" 
+                            style={{ 
+                              color: accessibilityMode ? textColor : '#ffffff',
+                              fontWeight: '700'
+                            }}
+                          >
+                            L{cell.lvl}
+                          </span>
+                        </>
+                      )}
                       {alliance && (
                         <span 
                           className="cell-tag" 
