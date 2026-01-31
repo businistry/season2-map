@@ -2733,7 +2733,7 @@ export default function Season2MapPlanner() {
                       onMouseEnter={(e) => !screenshotMode && setHoveredCell({ cell, row: rowIdx, col: colIdx, x: e.clientX, y: e.clientY, alliance })}
                       onMouseLeave={() => setHoveredCell(null)}
                     >
-                      {config.displayLines ? (
+                      {config.displayLines && config.displayLines.length >= 2 ? (
                         // Special rendering for tiles with custom display lines (e.g., War Palace)
                         <>
                           <span 
